@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useData } from '../../context/DataContext';
-import { Client, LineOfBusiness } from '../../types';
-import { X, Building2 } from 'lucide-react';
+import { Client, LineOfBusiness, CompanyClass, CompanyClassMode } from '../../types';
+import { X, Building2, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { classifyClient } from '../../utils/clientClassifier';
+import { cn } from '../../lib/utils';
 
 interface ClientFormProps {
   client?: Client | null;
@@ -10,7 +12,7 @@ interface ClientFormProps {
 }
 
 export const ClientForm: React.FC<ClientFormProps> = ({ client, onClose }) => {
-  const { addClient, updateClient } = useData();
+  const { addClient, updateClient, deals } = useData();
   
   const [formData, setFormData] = useState({
     companyName: '',
@@ -19,6 +21,9 @@ export const ClientForm: React.FC<ClientFormProps> = ({ client, onClose }) => {
     businessOccupation: '',
     assetDetail: '',
     estimatedValueAsset: '',
+    parentGroup: '',
+    companyClass: '' as '' | CompanyClass,
+    companyClassMode: 'auto' as CompanyClassMode,
     picName: '',
     picEmail: '',
     picPhone: ''
@@ -32,13 +37,30 @@ export const ClientForm: React.FC<ClientFormProps> = ({ client, onClose }) => {
         companyAddress: client.companyAddress || '',
         businessOccupation: client.businessOccupation,
         assetDetail: client.assetDetail || '',
-        estimatedValueAsset: client.estimatedValueAsset ? client.estimatedValueAsset.toString() : '',
+        estimatedValueAsset: client.estimatedValueAsset ? client.estimatedValueAsset.toLocaleString('en-US') : '',
+        parentGroup: client.parentGroup || '',
+        companyClass: (client.companyClass || '') as '' | CompanyClass,
+        companyClassMode: client.companyClassMode || 'auto',
         picName: client.picName || '',
         picEmail: client.picEmail || '',
         picPhone: client.picPhone || ''
       });
     }
   }, [client]);
+
+  // Live preview of what auto-classification would say, given the current form state.
+  const livePreview = useMemo(() => {
+    const previewClient: Client = {
+      id: client?.id || '__preview__',
+      companyName: formData.companyName,
+      lineOfBusiness: formData.lineOfBusiness,
+      businessOccupation: formData.businessOccupation,
+      parentGroup: formData.parentGroup,
+      createdAt: client?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    return classifyClient(previewClient, deals);
+  }, [client?.id, formData.parentGroup, deals, formData.companyName, formData.lineOfBusiness, formData.businessOccupation, client?.createdAt]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,9 +69,21 @@ export const ClientForm: React.FC<ClientFormProps> = ({ client, onClose }) => {
       return;
     }
 
+    const isManual = formData.companyClassMode === 'manual' && !!formData.companyClass;
+
     const payload = {
-      ...formData,
-      estimatedValueAsset: formData.estimatedValueAsset ? parseFloat(formData.estimatedValueAsset.replace(/,/g, '')) : undefined
+      companyName: formData.companyName,
+      lineOfBusiness: formData.lineOfBusiness,
+      companyAddress: formData.companyAddress,
+      businessOccupation: formData.businessOccupation,
+      assetDetail: formData.assetDetail,
+      estimatedValueAsset: formData.estimatedValueAsset ? parseFloat(formData.estimatedValueAsset.replace(/,/g, '')) : undefined,
+      parentGroup: formData.parentGroup.trim() || undefined,
+      companyClass: isManual ? (formData.companyClass as CompanyClass) : undefined,
+      companyClassMode: isManual ? ('manual' as CompanyClassMode) : ('auto' as CompanyClassMode),
+      picName: formData.picName,
+      picEmail: formData.picEmail,
+      picPhone: formData.picPhone,
     };
 
     if (client) {
@@ -111,6 +145,41 @@ export const ClientForm: React.FC<ClientFormProps> = ({ client, onClose }) => {
                     <option value="Property">Property</option>
                     <option value="Others">Others</option>
                   </select>
+                </div>
+                <div>
+                  <label className="block text-[12px] font-semibold text-slate-700 mb-1">Parent Group</label>
+                  <input type="text" value={formData.parentGroup} onChange={e => setFormData(prev => ({...prev, parentGroup: e.target.value}))} className="w-full px-3 py-2 border border-slate-200 rounded-md focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-[13px]" placeholder="e.g. Astra Group, Salim Group (optional)" />
+                  <p className="mt-1 text-[11px] text-slate-500">Setting a group will auto-classify this client as Large Enterprise.</p>
+                </div>
+                <div>
+                  <label className="block text-[12px] font-semibold text-slate-700 mb-1">Company Class</label>
+                  <select
+                    value={formData.companyClassMode === 'manual' ? formData.companyClass : '__auto__'}
+                    onChange={e => {
+                      const v = e.target.value;
+                      if (v === '__auto__') {
+                        setFormData(prev => ({ ...prev, companyClassMode: 'auto', companyClass: '' }));
+                      } else {
+                        setFormData(prev => ({ ...prev, companyClassMode: 'manual', companyClass: v as CompanyClass }));
+                      }
+                    }}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-md focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-[13px]"
+                  >
+                    <option value="__auto__">Auto: {livePreview.autoClass}</option>
+                    <option value="SME">Manual: SME</option>
+                    <option value="Large Enterprise">Manual: Large Enterprise</option>
+                  </select>
+                  <div className={cn(
+                    "mt-1.5 flex items-start gap-1.5 text-[11px]",
+                    formData.companyClassMode === 'manual' ? "text-amber-700" : "text-slate-500"
+                  )}>
+                    <Sparkles className="w-3 h-3 shrink-0 mt-0.5" />
+                    <span>
+                      {formData.companyClassMode === 'manual'
+                        ? `Manual override active. Auto would say: ${livePreview.autoClass}.`
+                        : livePreview.autoReasons.join(' · ')}
+                    </span>
+                  </div>
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-[12px] font-semibold text-slate-700 mb-1">Company Address</label>

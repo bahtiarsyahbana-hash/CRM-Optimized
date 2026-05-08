@@ -1,25 +1,49 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useData } from '../../context/DataContext';
-import { Client } from '../../types';
-import { Plus, Search, Building2, Edit, Trash2, ExternalLink } from 'lucide-react';
+import { Client, CompanyClass } from '../../types';
+import { Plus, Search, Building2, Edit, Trash2, Filter } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
 import { ClientForm } from './ClientForm';
+import { classifyClient } from '../../utils/clientClassifier';
+
+type ClassFilter = 'all' | CompanyClass;
 
 export const ClientsView = () => {
   const { clients, deals, deleteClient } = useData();
   const [search, setSearch] = useState('');
+  const [classFilter, setClassFilter] = useState<ClassFilter>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
 
-  const filteredClients = clients.filter(c => {
+  // Compute classification once per render for all clients.
+  const classifiedClients = useMemo(() => {
+    return clients.map(c => ({
+      client: c,
+      classification: classifyClient(c, deals),
+    }));
+  }, [clients, deals]);
+
+  const filteredClients = useMemo(() => {
     const q = search.toLowerCase();
-    return (
-      (c.companyName || '').toLowerCase().includes(q) || 
-      (c.lineOfBusiness || '').toLowerCase().includes(q) ||
-      (c.businessOccupation || '').toLowerCase().includes(q)
-    );
-  }).sort((a,b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    return classifiedClients
+      .filter(({ client, classification }) => {
+        const matchesSearch =
+          (client.companyName || '').toLowerCase().includes(q) ||
+          (client.lineOfBusiness || '').toLowerCase().includes(q) ||
+          (client.businessOccupation || '').toLowerCase().includes(q) ||
+          (client.parentGroup || '').toLowerCase().includes(q);
+        const matchesClass = classFilter === 'all' || classification.effectiveClass === classFilter;
+        return matchesSearch && matchesClass;
+      })
+      .sort((a, b) => new Date(b.client.updatedAt).getTime() - new Date(a.client.updatedAt).getTime());
+  }, [classifiedClients, search, classFilter]);
+
+  const counts = useMemo(() => {
+    const sme = classifiedClients.filter(c => c.classification.effectiveClass === 'SME').length;
+    const large = classifiedClients.filter(c => c.classification.effectiveClass === 'Large Enterprise').length;
+    return { all: classifiedClients.length, sme, large };
+  }, [classifiedClients]);
 
   const handleEdit = (client: Client) => {
     setEditingClient(client);
@@ -58,16 +82,23 @@ export const ClientsView = () => {
       </div>
 
       <div className="bg-white rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.05)] border border-slate-200 flex-1 flex flex-col overflow-hidden">
-        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between gap-4">
+        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between gap-4 flex-wrap">
           <div className="relative max-w-md w-full">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input 
               type="text" 
-              placeholder="Search by company, LOB, or occupation..." 
+              placeholder="Search by company, group, LOB, or occupation..." 
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-md text-[13px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-blue-500 transition-colors"
             />
+          </div>
+
+          <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-md p-1">
+            <Filter className="w-3.5 h-3.5 text-slate-400 ml-2 mr-1" />
+            <ClassFilterPill label={`All (${counts.all})`} active={classFilter === 'all'} onClick={() => setClassFilter('all')} />
+            <ClassFilterPill label={`SME (${counts.sme})`} active={classFilter === 'SME'} onClick={() => setClassFilter('SME')} />
+            <ClassFilterPill label={`Large Ent. (${counts.large})`} active={classFilter === 'Large Enterprise'} onClick={() => setClassFilter('Large Enterprise')} />
           </div>
         </div>
         
@@ -76,15 +107,16 @@ export const ClientsView = () => {
             <thead className="bg-[#f8fafc] sticky top-0 z-10 border-b border-slate-200">
               <tr>
                 <th className="px-6 py-3 font-semibold text-slate-600">Company Name</th>
+                <th className="px-6 py-3 font-semibold text-slate-600">Class</th>
+                <th className="px-6 py-3 font-semibold text-slate-600">Parent Group</th>
                 <th className="px-6 py-3 font-semibold text-slate-600">Line of Business</th>
                 <th className="px-6 py-3 font-semibold text-slate-600">Business Occupation</th>
-                <th className="px-6 py-3 font-semibold text-slate-600">Est. Asset Value</th>
                 <th className="px-6 py-3 font-semibold text-slate-600 text-center">Deals</th>
                 <th className="px-6 py-3 font-semibold text-slate-600 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredClients.map(client => {
+              {filteredClients.map(({ client, classification }) => {
                 const dealCount = getClientDealCount(client.id);
                 return (
                   <tr key={client.id} className="hover:bg-slate-50 transition-colors group">
@@ -97,13 +129,20 @@ export const ClientsView = () => {
                       </div>
                     </td>
                     <td className="px-6 py-3">
+                      <ClassBadge
+                        cls={classification.effectiveClass}
+                        isManual={classification.isManualOverride}
+                        title={classification.autoReasons.join(' · ')}
+                      />
+                    </td>
+                    <td className="px-6 py-3">
+                      <div className="text-slate-600">{client.parentGroup || '-'}</div>
+                    </td>
+                    <td className="px-6 py-3">
                       <div className="font-medium text-slate-700">{client.lineOfBusiness}</div>
                     </td>
                     <td className="px-6 py-3">
                       <div className="text-slate-600 truncate max-w-[200px]" title={client.businessOccupation}>{client.businessOccupation}</div>
-                    </td>
-                    <td className="px-6 py-3">
-                      <div className="font-mono text-slate-700">{client.estimatedValueAsset ? `IDR ${client.estimatedValueAsset.toLocaleString()}` : '-'}</div>
                     </td>
                     <td className="px-6 py-3 text-center">
                       <span className={cn(
@@ -141,13 +180,19 @@ export const ClientsView = () => {
             <div className="p-12 border-t border-slate-100 flex flex-col items-center justify-center text-slate-500">
               <Building2 className="w-12 h-12 text-slate-300 mb-3" />
               <p className="text-[14px] font-semibold text-slate-900 mb-1">No clients found</p>
-              <p className="text-[13px] text-slate-500 mb-4">You have not added any master client profiles.</p>
-              <button 
-                onClick={() => { setEditingClient(null); setIsModalOpen(true); }}
-                className="text-blue-600 text-[13px] font-bold hover:underline"
-              >
-                Create a Client Profile
-              </button>
+              <p className="text-[13px] text-slate-500 mb-4">
+                {clients.length === 0
+                  ? 'You have not added any master client profiles.'
+                  : 'No clients match your current search and filter.'}
+              </p>
+              {clients.length === 0 && (
+                <button 
+                  onClick={() => { setEditingClient(null); setIsModalOpen(true); }}
+                  className="text-blue-600 text-[13px] font-bold hover:underline"
+                >
+                  Create a Client Profile
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -160,5 +205,37 @@ export const ClientsView = () => {
         />
       )}
     </div>
+  );
+};
+
+const ClassFilterPill: React.FC<{ label: string; active: boolean; onClick: () => void }> = ({ label, active, onClick }) => (
+  <button
+    onClick={onClick}
+    className={cn(
+      "px-3 py-1.5 text-[12px] font-semibold rounded transition-colors",
+      active
+        ? "bg-slate-900 text-white"
+        : "text-slate-600 hover:bg-slate-100"
+    )}
+  >
+    {label}
+  </button>
+);
+
+const ClassBadge: React.FC<{ cls: CompanyClass; isManual: boolean; title?: string }> = ({ cls, isManual, title }) => {
+  const isLarge = cls === 'Large Enterprise';
+  return (
+    <span
+      title={title}
+      className={cn(
+        "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border",
+        isLarge
+          ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+          : "bg-slate-100 text-slate-700 border-slate-200"
+      )}
+    >
+      {isLarge ? 'Large Ent.' : 'SME'}
+      {isManual && <span className="text-[9px] font-bold uppercase opacity-70">·M</span>}
+    </span>
   );
 };
