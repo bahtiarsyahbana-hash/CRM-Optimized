@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { useData } from '../../context/DataContext';
 import { Client, CompanyClass } from '../../types';
-import { Plus, Search, Building2, Edit, Trash2, Filter } from 'lucide-react';
+import { Plus, Search, Building2, Edit, Trash2, Filter, Upload } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
 import { ClientForm } from './ClientForm';
+import { ClientImportModal } from './ClientImportModal';
 import { classifyClient } from '../../utils/clientClassifier';
 
 type ClassFilter = 'all' | CompanyClass;
@@ -14,6 +15,7 @@ export const ClientsView = () => {
   const [search, setSearch] = useState('');
   const [classFilter, setClassFilter] = useState<ClassFilter>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
 
   // Compute classification once per render for all clients.
@@ -72,13 +74,22 @@ export const ClientsView = () => {
           <h2 className="text-xl font-bold text-slate-900 mb-1">Client Database</h2>
           <p className="text-[13px] text-slate-500">Manage master company profiles.</p>
         </div>
-        <button 
-          onClick={() => { setEditingClient(null); setIsModalOpen(true); }}
-          className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-md font-semibold text-[13px] flex items-center gap-2 transition-colors shadow-sm"
-        >
-          <Plus className="w-4 h-4" />
-          Add Client Profile
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsImportOpen(true)}
+            className="bg-white hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-md font-semibold text-[13px] flex items-center gap-2 transition-colors border border-slate-200 shadow-sm"
+          >
+            <Upload className="w-4 h-4" />
+            Import
+          </button>
+          <button
+            onClick={() => { setEditingClient(null); setIsModalOpen(true); }}
+            className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-md font-semibold text-[13px] flex items-center gap-2 transition-colors shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            Add Client Profile
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.05)] border border-slate-200 flex-1 flex flex-col overflow-hidden">
@@ -203,6 +214,10 @@ export const ClientsView = () => {
           client={editingClient} 
           onClose={() => setIsModalOpen(false)} 
         />
+      )}
+
+      {isImportOpen && (
+        <ClientImportModal onClose={() => setIsImportOpen(false)} />
       )}
     </div>
   );
