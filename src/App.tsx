@@ -7,12 +7,13 @@ import { ClientsView } from './components/clients/ClientsView';
 import { PipelineView } from './components/pipeline/PipelineView';
 import { PoliciesView } from './components/policies/PoliciesView';
 import { AftersalesView } from './components/aftersales/AftersalesView';
+import { ClaimsView } from './components/claims/ClaimsView';
 import { ArchitectureView } from './components/docs/ArchitectureView';
 import { DashboardOverview } from './components/dashboard/DashboardOverview';
 import { SettingsView } from './components/settings/SettingsView';
 import { GlobalSearch } from './components/shared/GlobalSearch';
 
-type ViewState = 'dashboard' | 'clients' | 'pipelines' | 'policies' | 'aftersales' | 'architecture' | 'reports' | 'settings';
+type ViewState = 'dashboard' | 'clients' | 'pipelines' | 'policies' | 'claims' | 'aftersales' | 'architecture' | 'reports' | 'settings';
 
 function Dashboard() {
   const [currentView, setCurrentView] = useState<ViewState>('pipelines'); // Pipeline as primary view
@@ -21,6 +22,7 @@ function Dashboard() {
     { id: 'dashboard', label: 'Dashboard', icon: PieChart },
     { id: 'pipelines', label: 'Pipelines', icon: LayoutDashboard },
     { id: 'policies', label: 'Policies', icon: Briefcase },
+    { id: 'claims', label: 'Claims', icon: ShieldAlert },
     { id: 'clients', label: 'Clients', icon: Users },
     { id: 'reports', label: 'Reports', icon: FileText },
     { id: 'settings', label: 'Settings', icon: Settings },
@@ -50,8 +52,8 @@ function Dashboard() {
               onClick={() => setCurrentView(item.id)}
               className={cn(
                 "flex items-center gap-3 px-5 py-2.5 text-sm transition-colors",
-                currentView === item.id 
-                  ? "bg-slate-100/80 text-blue-600 font-semibold border-r-4 border-blue-600" 
+                currentView === item.id
+                  ? "bg-slate-100/80 text-blue-600 font-semibold border-r-4 border-blue-600"
                   : "text-slate-500 hover:bg-slate-50"
               )}
             >
@@ -59,7 +61,7 @@ function Dashboard() {
               {item.label}
             </button>
           ))}
-          
+
           <div className="mt-8 px-5 w-full flex flex-col pt-4 border-t border-slate-100">
              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">System</div>
              <button
@@ -92,6 +94,7 @@ function Dashboard() {
             {currentView === 'clients' && <ClientsView />}
             {currentView === 'pipelines' && <PipelineView />}
             {currentView === 'policies' && <PoliciesView />}
+            {currentView === 'claims' && <ClaimsView />}
             {currentView === 'aftersales' && <AftersalesView />}
             {currentView === 'architecture' && <ArchitectureView />}
             {currentView === 'reports' && (
@@ -116,4 +119,3 @@ export default function App() {
     </DataProvider>
   );
 }
-

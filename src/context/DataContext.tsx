@@ -1,6 +1,25 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Deal, Claim, Endorsement, HistoryLog, DealStage, DealType, Client } from '../types';
+import { Deal, Claim, ClaimStatus, Endorsement, HistoryLog, DealStage, DealType, Client } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+
+/**
+ * Migrate legacy claims to the new ClaimStatus values + dateRegistered field.
+ * Old claims had statuses: 'Reported' | 'Assessing' | 'Approved' | 'Declined' and dateFiled.
+ */
+const LEGACY_STATUS_MAP: Record<string, ClaimStatus> = {
+  'Reported': 'Claim Registered',
+  'Assessing': 'Under Assessment',
+  'Approved': 'Approved',
+  'Declined': 'Reject',
+};
+
+function migrateClaims(rawClaims: any[]): Claim[] {
+  return rawClaims.map(c => ({
+    ...c,
+    status: LEGACY_STATUS_MAP[c.status] ?? c.status,
+    dateRegistered: c.dateRegistered || c.dateFiled || new Date().toISOString(),
+  }));
+}
 
 interface DataContextType {
   clients: Client[];
@@ -15,7 +34,7 @@ interface DataContextType {
   updateDeal: (id: string, deal: Partial<Deal>) => void;
   deleteDeal: (id: string) => void;
   updateDealStage: (id: string, newStage: DealStage) => void;
-  addClaim: (claim: Omit<Claim, 'id' | 'dateFiled'>) => void;
+  addClaim: (claim: Omit<Claim, 'id' | 'dateRegistered'>) => void;
   updateClaimStatus: (id: string, status: Claim['status']) => void;
   addEndorsement: (endorsement: Omit<Endorsement, 'id' | 'dateRequested'>) => void;
   updateEndorsementStatus: (id: string, status: Endorsement['status']) => void;
@@ -36,7 +55,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const load = (key: string) => JSON.parse(localStorage.getItem(key) || '[]');
     setClients(load('clients'));
     setDeals(load('deals'));
-    setClaims(load('claims'));
+    setClaims(migrateClaims(load('claims')));
     setEndorsements(load('endorsements'));
     setHistoryLogs(load('historyLogs'));
   }, []);
@@ -111,14 +130,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const oldStage = deal.statusStage;
     const updatedDeal: Deal = { ...deal, statusStage: newStage, updatedAt: new Date().toISOString() };
-    
+
     // Automatically move to Renewal Client if a New Business reaches Policy On Progress
     if (deal.dealType === 'New Business' && newStage === 'Policy On Progress') {
       updatedDeal.dealType = 'Renewal';
     }
 
     const newDeals = deals.map(d => d.id === id ? updatedDeal : d);
-    
+
     // Add history log
     const newLog: HistoryLog = {
       id: uuidv4(),
@@ -135,11 +154,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     saveAll('historyLogs', newLogs);
   };
 
-  const addClaim = (claimData: Omit<Claim, 'id' | 'dateFiled'>) => {
+  const addClaim = (claimData: Omit<Claim, 'id' | 'dateRegistered'>) => {
     const newClaim: Claim = {
       ...claimData,
       id: uuidv4(),
-      dateFiled: new Date().toISOString(),
+      dateRegistered: new Date().toISOString(),
     };
     const newClaims = [...claims, newClaim];
     setClaims(newClaims);

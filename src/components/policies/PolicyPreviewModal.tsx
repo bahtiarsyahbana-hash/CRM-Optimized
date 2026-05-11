@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Deal, Client } from '../../types';
+import { Deal, Client, Currency, CURRENCIES } from '../../types';
 import { X, Download, Upload, ShieldAlert, FileEdit, FileText } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 import toast from 'react-hot-toast';
@@ -21,13 +21,29 @@ export const PolicyPreviewModal = ({ policy, client, onClose, onUploadOriginal, 
   const [requestTitle, setRequestTitle] = useState('');
   const [requestDescription, setRequestDescription] = useState('');
 
+  // Claim-specific fields
+  const [claimDateReported, setClaimDateReported] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [claimEstimatedAmount, setClaimEstimatedAmount] = useState<string>('');
+  const [claimCurrency, setClaimCurrency] = useState<Currency>((policy.currency as Currency) || 'IDR');
+
   const handleAftersalesSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!requestTitle || !requestDescription) return toast.error('All fields required');
 
     if (requestType === 'claim') {
-      addClaim({ dealId: policy.id, title: requestTitle, description: requestDescription, status: 'Reported' });
-      toast.success('Claim reported successfully');
+      if (!claimDateReported) return toast.error('Date Reported is required for claims');
+      const estAmount = claimEstimatedAmount ? parseFloat(claimEstimatedAmount.replace(/,/g, '')) : undefined;
+      addClaim({
+        dealId: policy.id,
+        title: requestTitle,
+        description: requestDescription,
+        status: 'Claim Registered',
+        dateReported: new Date(claimDateReported).toISOString(),
+        estimatedAmount: estAmount,
+        currency: claimCurrency,
+        insuranceCompany: policy.insuranceCompany,
+      });
+      toast.success('Claim registered successfully');
     } else {
       addEndorsement({ dealId: policy.id, type: requestTitle, description: requestDescription, status: 'Requested' });
       toast.success('Endorsement requested successfully');
@@ -35,6 +51,7 @@ export const PolicyPreviewModal = ({ policy, client, onClose, onUploadOriginal, 
 
     setRequestTitle('');
     setRequestDescription('');
+    setClaimEstimatedAmount('');
   };
 
   const coverNoteNumber = policy.coverNoteNumber || `CN-Draft-${new Date().getFullYear()}`;
@@ -48,8 +65,8 @@ export const PolicyPreviewModal = ({ policy, client, onClose, onUploadOriginal, 
               <FileText className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-900 leading-tight">Policy Management</h2>
-              <p className="text-[12px] font-medium text-slate-500">{client.companyName} • {policy.typeOfInsurance}</p>
+              <h2 className="text-lg font-bold text-slate-900 leading-tight">{client.companyName} — Policy</h2>
+              <p className="text-[12px] font-medium text-slate-500">{policy.typeOfInsurance} • {policy.insuranceCompany || 'TBA'} • {coverNoteNumber}</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors">
@@ -57,125 +74,71 @@ export const PolicyPreviewModal = ({ policy, client, onClose, onUploadOriginal, 
           </button>
         </div>
 
-        <div className="flex border-b border-slate-100 shrink-0">
+        <div className="px-6 pt-2 border-b border-slate-100 flex gap-4 shrink-0">
           <button
             onClick={() => setActiveTab('preview')}
-            className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === 'preview' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/30' : 'text-slate-500 hover:text-slate-800 bg-slate-50'}`}
+            className={`pb-3 text-[13px] font-semibold transition-colors ${activeTab === 'preview' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-500 hover:text-slate-800'}`}
           >
-            Cover Note / Original Policy
+            Policy Preview
           </button>
           <button
             onClick={() => setActiveTab('aftersales')}
-            className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === 'aftersales' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/30' : 'text-slate-500 hover:text-slate-800 bg-slate-50'}`}
+            className={`pb-3 text-[13px] font-semibold transition-colors ${activeTab === 'aftersales' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-500 hover:text-slate-800'}`}
           >
             Aftersales (Claim/Endorsement)
           </button>
         </div>
 
-        <div className="flex-1 overflow-auto bg-slate-50 p-6">
+        <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+
           {activeTab === 'preview' && (
-            <div className="space-y-6 max-w-3xl mx-auto">
-              {/* Document actions */}
-              <div className="flex gap-4">
-                <button
-                  onClick={onDownloadCoverNote}
-                  className="flex-1 bg-white border border-slate-200 hover:border-blue-300 hover:bg-blue-50 px-4 py-3 rounded-lg text-[13px] font-semibold text-slate-700 hover:text-blue-700 transition-all shadow-sm flex flex-col items-center justify-center gap-2"
-                >
-                  <Download className="w-5 h-5 text-blue-500" />
-                  Download Cover Note PDF
-                </button>
-                <button
-                  onClick={onUploadOriginal}
-                  className="flex-1 bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 px-4 py-3 rounded-lg text-[13px] font-semibold text-slate-700 transition-all shadow-sm flex flex-col items-center justify-center gap-2"
-                >
-                  <Upload className="w-5 h-5 text-slate-500" />
-                  {policy.originalPolicyFile ? 'Replace Original Policy' : 'Upload Original Policy'}
-                </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">
+              <div className="bg-white border border-slate-200 rounded-lg p-5">
+                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Cover Note</div>
+                <div className="text-[14px] font-bold text-slate-900 mb-1">{coverNoteNumber}</div>
+                <div className="text-[12px] text-slate-500">Generated from deal data</div>
+                <div className="mt-4 pt-4 border-t border-slate-100 flex gap-2">
+                  <button onClick={onDownloadCoverNote} className="px-3 py-2 text-[12px] font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors flex items-center gap-1.5">
+                    <Download className="w-3.5 h-3.5" /> Download Cover Note
+                  </button>
+                </div>
               </div>
 
-              {policy.originalPolicyFile && (
-                <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-4 flex items-center justify-between">
-                   <div className="flex items-center gap-3">
-                     <FileText className="w-5 h-5 text-emerald-600" />
-                     <div>
-                       <div className="text-[13px] font-semibold text-emerald-900">Original Policy Uploaded</div>
-                       <div className="text-[12px] text-emerald-700">{policy.originalPolicyFile}</div>
-                     </div>
-                   </div>
-                </div>
-              )}
-
-              {/* Cover Note Preview */}
-              <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
-                <div className="bg-slate-900 px-4 py-2 flex items-center justify-between">
-                  <div className="text-slate-300 text-[12px] font-mono">Generated Cover Note Preview</div>
-                </div>
-                <div className="p-8 font-sans text-slate-800">
-                  <div className="text-center mb-8">
-                    <h3 className="text-2xl font-bold tracking-tight text-slate-900">COVER NOTE</h3>
+              <div className="bg-white border border-slate-200 rounded-lg p-5">
+                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Original Policy</div>
+                {policy.originalPolicyFile ? (
+                  <div className="text-[13px] font-medium text-slate-900 flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-blue-600" />
+                    {policy.originalPolicyFile}
                   </div>
+                ) : (
+                  <div className="text-[12px] text-slate-500 italic">No file uploaded</div>
+                )}
+                <div className="mt-4 pt-4 border-t border-slate-100 flex gap-2">
+                  <button onClick={onUploadOriginal} className="px-3 py-2 text-[12px] font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors flex items-center gap-1.5">
+                    <Upload className="w-3.5 h-3.5" /> {policy.originalPolicyFile ? 'Replace' : 'Upload'} PDF
+                  </button>
+                </div>
+              </div>
 
-                  <div className="flex justify-between text-[12px] mb-8 pb-4 border-b border-slate-100">
-                    <div>
-                      <span className="text-slate-500">Cover Note No:</span> <span className="font-semibold">{coverNoteNumber}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">Date of Issue:</span> <span className="font-semibold">{new Date().toLocaleDateString()}</span>
-                    </div>
+              <div className="md:col-span-2 bg-white border border-slate-200 rounded-lg p-5">
+                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-3">Key Details</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-[13px]">
+                  <div>
+                    <div className="text-slate-500 text-[11px]">Sum Insured</div>
+                    <div className="font-semibold text-slate-900">{policy.currency} {policy.sumInsured?.toLocaleString() || '-'}</div>
                   </div>
-
-                  <div className="space-y-4 text-[13px]">
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="font-semibold text-slate-500 col-span-1">Name of Insured</div>
-                      <div className="col-span-2 font-medium">{client.companyName}</div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="font-semibold text-slate-500 col-span-1">Correspondence Address</div>
-                      <div className="col-span-2 font-medium">{client.companyAddress || '-'}</div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="font-semibold text-slate-500 col-span-1">Period of Insurance</div>
-                      <div className="col-span-2 font-medium">
-                        {policy.periodStart ? new Date(policy.periodStart).toLocaleDateString() : 'TBA'} to {policy.periodEnd ? new Date(policy.periodEnd).toLocaleDateString() : 'TBA'}
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="font-semibold text-slate-500 col-span-1">Risk Occupation</div>
-                      <div className="col-span-2 font-medium">{client.businessOccupation || '-'}</div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="font-semibold text-slate-500 col-span-1">Risk Location</div>
-                      <div className="col-span-2 font-medium">{policy.riskLocation || client.companyAddress || '-'}</div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4 border-t border-slate-100 pt-4">
-                      <div className="font-semibold text-slate-500 col-span-1">Type of Insurance</div>
-                      <div className="col-span-2 font-bold text-slate-900">{policy.typeOfInsurance}</div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="font-semibold text-slate-500 col-span-1">Insurance Company</div>
-                      <div className="col-span-2 font-medium">{policy.insuranceCompany || '-'}</div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="font-semibold text-slate-500 col-span-1">Interest / Sum Insured</div>
-                      <div className="col-span-2 font-medium">
-                        <div className="font-bold text-slate-900">{policy.currency} {policy.sumInsured?.toLocaleString() || '-'}</div>
-                        {policy.sumInsuredBreakdown && policy.sumInsuredBreakdown.length > 0 && (
-                          <div className="mt-1 space-y-1">
-                            {policy.sumInsuredBreakdown.map((b,i) => (
-                              <div key={i} className="text-[12px] text-slate-600">- {b.assetName}: {policy.currency} {b.amount.toLocaleString()}</div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="font-semibold text-slate-500 col-span-1">Premium Rate</div>
-                      <div className="col-span-2 font-medium">{policy.premiumRate || '-'}</div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="font-semibold text-slate-500 col-span-1">Premium Calculation</div>
-                      <div className="col-span-2 font-medium">{policy.currency} {policy.premiumAmount?.toLocaleString() || '-'}</div>
-                    </div>
+                  <div>
+                    <div className="text-slate-500 text-[11px]">Premium</div>
+                    <div className="font-semibold text-slate-900">{policy.currency} {policy.premiumAmount?.toLocaleString() || '-'}</div>
+                  </div>
+                  <div>
+                    <div className="text-slate-500 text-[11px]">Period Start</div>
+                    <div className="font-semibold text-slate-900">{policy.periodStart ? new Date(policy.periodStart).toLocaleDateString() : '-'}</div>
+                  </div>
+                  <div>
+                    <div className="text-slate-500 text-[11px]">Period End</div>
+                    <div className="font-semibold text-slate-900">{policy.periodEnd ? new Date(policy.periodEnd).toLocaleDateString() : '-'}</div>
                   </div>
                 </div>
               </div>
@@ -204,23 +167,67 @@ export const PolicyPreviewModal = ({ policy, client, onClose, onUploadOriginal, 
                       <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">
                         {requestType === 'claim' ? 'Claim Title' : 'Endorsement Type / Title'}
                       </label>
-                      <input 
-                        type="text" 
+                      <input
+                        type="text"
                         value={requestTitle}
                         onChange={(e) => setRequestTitle(e.target.value)}
                         placeholder={requestType === 'claim' ? "e.g., Fire Damage at Warehouse" : "e.g., Change of Address"}
-                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]" 
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]"
                       />
                     </div>
                     <div>
                       <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Description</label>
-                      <textarea 
+                      <textarea
                         value={requestDescription}
                         onChange={(e) => setRequestDescription(e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px] min-h-[120px] resize-y" 
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px] min-h-[120px] resize-y"
                         placeholder={requestType === 'claim' ? "Describe the incident..." : "Describe the requested changes..."}
                       />
                     </div>
+
+                    {requestType === 'claim' && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-100 mt-2">
+                        <div>
+                          <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Date Reported *</label>
+                          <input
+                            type="date"
+                            value={claimDateReported}
+                            onChange={(e) => setClaimDateReported(e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]"
+                          />
+                          <p className="mt-1 text-[11px] text-slate-500">When the incident was reported by the insured.</p>
+                        </div>
+                        <div>
+                          <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Estimated Amount</label>
+                          <div className="flex gap-2">
+                            <select
+                              value={claimCurrency}
+                              onChange={(e) => setClaimCurrency(e.target.value as Currency)}
+                              className="px-2 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 text-[13px] font-medium"
+                            >
+                              {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            <input
+                              type="text"
+                              value={claimEstimatedAmount}
+                              onChange={(e) => {
+                                const raw = e.target.value.replace(/,/g, '').replace(/[^\d.]/g, '');
+                                if (raw === '') return setClaimEstimatedAmount('');
+                                const n = parseFloat(raw);
+                                if (!isNaN(n)) setClaimEstimatedAmount(n.toLocaleString('en-US'));
+                              }}
+                              placeholder="0"
+                              className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px] font-mono text-right"
+                            />
+                          </div>
+                          <p className="mt-1 text-[11px] text-slate-500">Initial estimate; can be revised later.</p>
+                        </div>
+                        <div className="md:col-span-2 bg-slate-50 border border-slate-200 rounded-md px-3 py-2 flex items-center justify-between text-[12px]">
+                          <span className="font-semibold text-slate-600">Insurance Company</span>
+                          <span className="text-slate-800 font-medium">{policy.insuranceCompany || 'Not set on this policy'}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-8 pt-6 border-t border-slate-100 flex justify-end">

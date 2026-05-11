@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 export const AftersalesView = () => {
   const { deals, claims, endorsements, addClaim, updateClaimStatus, addEndorsement, updateEndorsementStatus } = useData();
   const [activeTab, setActiveTab] = useState<'claims' | 'endorsements'>('claims');
-  
+
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [dealId, setDealId] = useState('');
   const [title, setTitle] = useState('');
@@ -23,23 +23,25 @@ export const AftersalesView = () => {
     }
 
     if (activeTab === 'claims') {
-      addClaim({ dealId, title, description, status: 'Reported' });
+      addClaim({ dealId, title, description, status: 'Claim Registered' });
       toast.success('Claim filed successfully');
     } else {
       addEndorsement({ dealId, type: title, description, status: 'Requested' });
       toast.success('Endorsement requested successfully');
     }
-    
+
     setIsAddOpen(false);
     setDealId(''); setTitle(''); setDescription('');
   };
 
   const getStatusColor = (status: string) => {
     switch(status) {
-      case 'Reported': case 'Requested': return 'bg-amber-100 text-amber-700 border-amber-200';
-      case 'Assessing': case 'Underwriting': return 'bg-blue-100 text-blue-700 border-blue-200';
+      case 'Claim Registered': case 'Requested': return 'bg-amber-100 text-amber-700 border-amber-200';
+      case 'Pending': return 'bg-slate-100 text-slate-700 border-slate-200';
+      case 'Under Assessment': case 'Underwriting': return 'bg-blue-100 text-blue-700 border-blue-200';
       case 'Approved': case 'Re-bound': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-      case 'Declined': return 'bg-red-100 text-red-700 border-red-200';
+      case 'Settled': return 'bg-emerald-200 text-emerald-800 border-emerald-300';
+      case 'Reject': case 'Declined': return 'bg-red-100 text-red-700 border-red-200';
       default: return 'bg-slate-100 text-slate-700 border-slate-200';
     }
   };
@@ -52,7 +54,7 @@ export const AftersalesView = () => {
           <h1 className="text-xl font-bold text-slate-900 mb-1">Aftersales Service</h1>
           <p className="text-[13px] text-slate-500">Manage active policy claims and endorsements</p>
         </div>
-        <button 
+        <button
           onClick={() => setIsAddOpen(true)}
           className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-md font-semibold text-[13px] flex items-center gap-2 transition-colors shadow-sm"
         >
@@ -63,7 +65,7 @@ export const AftersalesView = () => {
 
       {/* Tabs */}
       <div className="bg-white border-b border-slate-200 px-6 py-2 flex gap-4 shrink-0">
-        <button 
+        <button
           onClick={() => setActiveTab('claims')}
           className={cn(
             "pb-2 text-[13px] font-semibold transition-colors relative",
@@ -74,7 +76,7 @@ export const AftersalesView = () => {
             <ShieldAlert className="w-4 h-4" /> Claims Management
           </div>
         </button>
-        <button 
+        <button
           onClick={() => setActiveTab('endorsements')}
           className={cn(
             "pb-2 text-[13px] font-semibold transition-colors relative",
@@ -102,11 +104,7 @@ export const AftersalesView = () => {
                       <div>
                         <h4 className="font-semibold text-slate-900 text-[14px]">{claim.title}</h4>
                         <div className="text-[13px] text-slate-500 flex gap-2 items-center">
-                          <span className="font-medium text-slate-700">{deal?.companyName || 'Unknown'}</span>
-                          <span>•</span>
-                          <span>{deal?.lineOfBusiness}</span>
-                          <span>•</span>
-                          <span>{new Date(claim.dateFiled).toLocaleDateString()}</span>
+                          <span>{new Date(claim.dateRegistered || claim.dateFiled || Date.now()).toLocaleDateString()}</span>
                         </div>
                       </div>
                       <span className={cn("px-2.5 py-0.5 rounded-full text-[10px] font-semibold border uppercase", getStatusColor(claim.status))}>
@@ -114,17 +112,19 @@ export const AftersalesView = () => {
                       </span>
                     </div>
                     <p className="text-slate-600 text-[13px] mt-2">{claim.description}</p>
-                    
+
                     <div className="mt-4 pt-3 border-t border-slate-100 flex gap-2">
-                      <select 
+                      <select
                         value={claim.status}
                         onChange={(e) => updateClaimStatus(claim.id, e.target.value as any)}
                         className="text-[12px] bg-white border border-slate-200 rounded text-slate-700 px-2 py-1 focus:outline-none focus:border-blue-500"
                       >
-                        <option value="Reported">Reported</option>
-                        <option value="Assessing">Assessing</option>
+                        <option value="Claim Registered">Claim Registered</option>
+                        <option value="Pending">Pending</option>
+                        <option value="Under Assessment">Under Assessment</option>
                         <option value="Approved">Approved</option>
-                        <option value="Declined">Declined</option>
+                        <option value="Settled">Settled</option>
+                        <option value="Reject">Reject</option>
                       </select>
                     </div>
                   </div>
@@ -153,10 +153,6 @@ export const AftersalesView = () => {
                       <div>
                         <h4 className="font-semibold text-[14px] text-slate-900">{endors.type}</h4>
                         <div className="text-[13px] text-slate-500 flex gap-2 items-center">
-                          <span className="font-medium text-slate-700">{deal?.companyName || 'Unknown'}</span>
-                          <span>•</span>
-                          <span>{deal?.lineOfBusiness}</span>
-                          <span>•</span>
                           <span>{new Date(endors.dateRequested).toLocaleDateString()}</span>
                         </div>
                       </div>
@@ -167,7 +163,7 @@ export const AftersalesView = () => {
                     <p className="text-slate-600 text-[13px] mt-2">{endors.description}</p>
 
                     <div className="mt-4 pt-4 border-t border-slate-100 flex gap-2">
-                      <select 
+                      <select
                         value={endors.status}
                         onChange={(e) => updateEndorsementStatus(endors.id, e.target.value as any)}
                         className="text-[12px] bg-white border border-slate-200 rounded text-slate-700 px-2 py-1 focus:outline-none focus:border-blue-500"
@@ -203,7 +199,7 @@ export const AftersalesView = () => {
                 <select value={dealId} onChange={e => setDealId(e.target.value)} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white transition-colors">
                   <option value="">-- Select Active Policy --</option>
                   {activeDeals.map(d => {
-                    return <option key={d.id} value={d.id}>{d.companyName} - {d.lineOfBusiness}</option>
+                    return <option key={d.id} value={d.id}>{d.typeOfInsurance}</option>
                   })}
                 </select>
                 {activeDeals.length === 0 && (
@@ -220,7 +216,7 @@ export const AftersalesView = () => {
                 <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">Description / Details</label>
                 <textarea value={description} onChange={e => setDescription(e.target.value)} rows={4} className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white transition-colors" placeholder="Provide full details..."></textarea>
               </div>
-              
+
               <div className="pt-4 flex gap-3">
                 <button type="button" onClick={() => setIsAddOpen(false)} className="flex-1 px-4 py-2.5 font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition-colors">Cancel</button>
                 <button type="submit" disabled={!dealId} className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-xl transition-colors">Submit</button>

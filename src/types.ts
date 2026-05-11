@@ -4,6 +4,30 @@ export type LineOfBusiness = 'Manufacture' | 'Trading' | 'Financial Institution'
 export type CompanyClass = 'SME' | 'Large Enterprise';
 export type CompanyClassMode = 'auto' | 'manual';
 
+export type Currency = 'IDR' | 'USD' | 'EUR' | 'SGD' | 'JPY' | 'AUD' | 'CNY';
+
+export const CURRENCIES: Currency[] = ['IDR', 'USD', 'EUR', 'SGD', 'JPY', 'AUD', 'CNY'];
+
+export type ClaimStatus =
+  | 'Claim Registered'
+  | 'Pending'
+  | 'Under Assessment'
+  | 'Approved'
+  | 'Settled'
+  | 'Reject';
+
+/** Statuses after which a claim is locked and cannot be moved again. */
+export const TERMINAL_CLAIM_STATUSES: ClaimStatus[] = ['Settled', 'Reject'];
+
+/** Linear progression order. Reject is allowed as an off-ramp at any non-terminal step. */
+export const CLAIM_PROGRESSION: ClaimStatus[] = [
+  'Claim Registered',
+  'Pending',
+  'Under Assessment',
+  'Approved',
+  'Settled',
+];
+
 export interface Client {
   id: string;
   companyName: string;
@@ -62,8 +86,18 @@ export interface Claim {
   dealId: string;
   title: string;
   description: string;
-  status: 'Reported' | 'Assessing' | 'Approved' | 'Declined';
-  dateFiled: string;
+  status: ClaimStatus;
+  /** When the claim was registered in the system (auto). */
+  dateRegistered: string;
+  /** When the incident was originally reported by the insured. User-provided. */
+  dateReported?: string;
+  /** Estimated claim amount. */
+  estimatedAmount?: number;
+  currency?: Currency;
+  /** Snapshot of the insurance company at claim time (inherited from the policy). */
+  insuranceCompany?: string;
+  /** @deprecated Use dateRegistered instead. Kept for legacy data. */
+  dateFiled?: string;
 }
 
 export interface Endorsement {
