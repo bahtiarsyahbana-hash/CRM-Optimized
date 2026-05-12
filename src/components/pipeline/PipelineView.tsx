@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useData } from '../../context/DataContext';
 import { Deal, DealStage, DealType } from '../../types';
-import { Plus, Search, Building2, MoreHorizontal, CheckCircle2, Edit2 } from 'lucide-react';
+import { Plus, Search, Building2, MoreHorizontal, CheckCircle2, Edit2, Upload } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { generateSOC } from '../../utils/socGenerator';
 import toast from 'react-hot-toast';
 import { DealDetailForm } from '../clients/DealDetailForm';
-import { SOCManagerModal } from './SOCManagerModal';
+import { SOCManagerModal } from './SOCManagerModal';import { RenewalImportModal } from './RenewalImportModal';
 
 export const PipelineView = () => {
   const { deals, clients, updateDealStage } = useData();
@@ -15,6 +15,7 @@ export const PipelineView = () => {
   const [filterType, setFilterType] = useState<string>('All');
   
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const [editDeal, setEditDeal] = useState<Deal | null>(null);
   const [socDeal, setSocDeal] = useState<Deal | null>(null);
   const [activeDealForStage, setActiveDealForStage] = useState<Deal | null>(null);
@@ -91,13 +92,22 @@ export const PipelineView = () => {
           <h1 className="text-xl font-bold text-slate-900 mb-1">Pipeline & Opportunities</h1>
           <p className="text-[13px] text-slate-500">Monitor and track deal opportunities connected to your clients.</p>
         </div>
-        <button 
-          onClick={() => setIsAddOpen(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-md font-semibold text-[13px] flex items-center gap-2 transition-colors shadow-sm"
-        >
-          <Plus className="w-4 h-4" />
-          Add Deal
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsImportOpen(true)}
+            className="bg-white hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-md font-semibold text-[13px] flex items-center gap-2 transition-colors border border-slate-200 shadow-sm"
+          >
+            <Upload className="w-4 h-4" />
+            Import Renewals
+          </button>
+          <button 
+            onClick={() => setIsAddOpen(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-md font-semibold text-[13px] flex items-center gap-2 transition-colors shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            Add Deal
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-4 mb-6 border-b border-slate-200 pb-px shrink-0">
@@ -325,6 +335,9 @@ export const PipelineView = () => {
 
       {isAddOpen && (
         <DealDetailForm onClose={() => setIsAddOpen(false)} />
+      )}
+      {isImportOpen && (
+        <RenewalImportModal onClose={() => setIsImportOpen(false)} />
       )}
       {editDeal && (
         <DealDetailForm deal={editDeal} onClose={() => setEditDeal(null)} />
