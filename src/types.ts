@@ -47,6 +47,22 @@ export interface Client {
   createdBy?: string;
 }
 
+export interface DealCommission {
+  /** Base commission rate (%). Defaults from LOB on the client: General=15, MV=25, others=manual. */
+  baseRate?: number;
+  /** Discount given to client (%). Capped at baseRate. */
+  discountPercent?: number;
+  /** "EF" commission — behind-the-table, custom % paid by insurer. */
+  efCommissionPercent?: number;
+  /** PPh 23 tax % withheld by insurer on commission. Defaults to 2. */
+  taxPercent?: number;
+  /** Optional cashback paid to a sales agent. */
+  agentName?: string;
+  agentCashback?: number;
+}
+
+export type PaymentStatus = 'Unpaid' | 'Paid';
+
 export interface Deal {
   id: string;
   clientId: string;
@@ -68,6 +84,14 @@ export interface Deal {
   periodEnd?: string;
   coverNoteNumber?: string;
   originalPolicyFile?: string;
+  /** Commission breakdown — added in v0.2. Optional for backward compat. */
+  commission?: DealCommission;
+  /** Date the invoice was sent to the client (ISO). Drives receivables aging. */
+  invoiceDate?: string;
+  /** Payment status for the invoice. Defaults to 'Unpaid' once invoice exists. */
+  paymentStatus?: PaymentStatus;
+  /** Date the client paid the premium (ISO). Only set when paymentStatus = 'Paid'. */
+  paymentDate?: string;
   createdAt: string;
   updatedAt: string;
   createdBy?: string;

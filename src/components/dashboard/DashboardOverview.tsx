@@ -1,176 +1,301 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useData } from '../../context/DataContext';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend
+import { Deal, DealStage, TERMINAL_CLAIM_STATUSES } from '../../types';
+import { computeDealCommission } from '../../utils/commissionCalc';
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
 } from 'recharts';
-import { TrendingUp, Users, ShieldAlert, DollarSign, Briefcase } from 'lucide-react';
+import {
+  Coins, TrendingUp, Sparkles, Clock, ShieldAlert, Target,
+} from 'lucide-react';
+import { cn } from '../../lib/utils';
+
+// ----- helpers --------------------------------------------------------------
+
+const BOUND_STAGES: DealStage[] = ['Bind / Closed Won', 'Policy On Progress'];
+const PROSPECT_STAGES: DealStage[] = ['Leads', 'Data Collection', 'Quote', 'Nego'];
+
+const isBound = (d: Deal) => BOUND_STAGES.includes(d.statusStage);
+const isProspect = (d: Deal) => PROSPECT_STAGES.includes(d.statusStage);
+
+const isoMonthKey = (iso: string) => iso.slice(0, 7);
+const monthLabel = (iso: string) => {
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+};
+
+const currentMonthStart = () => {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+};
+
+const daysSince = (iso?: string): number | null => {
+  if (!iso) return null;
+  const then = new Date(iso).getTime();
+  if (isNaN(then)) return null;
+  return Math.floor((Date.now() - then) / (1000 * 60 * 60 * 24));
+};
+
+const fmtIDR = (n: number) => {
+  if (Math.abs(n) >= 1_000_000_000) return `Rp ${(n / 1_000_000_000).toFixed(2)}B`;
+  if (Math.abs(n) >= 1_000_000) return `Rp ${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `Rp ${(n / 1_000).toFixed(0)}K`;
+  return `Rp ${Math.round(n).toLocaleString()}`;
+};
+
+const fmtIDRFull = (n: number) => `Rp ${Math.round(n).toLocaleString()}`;
+
+// ----- main view ------------------------------------------------------------
 
 export const DashboardOverview = () => {
   const { deals, claims, clients } = useData();
 
-  // Metrics calculation
-  const totalClients = clients.length;
-  const newBusinessCount = deals.filter(d => d.dealType === 'New Business').length;
-  const renewalCount = deals.filter(d => d.dealType === 'Renewal').length;
-  const crossSellCount = deals.filter(d => d.dealType === 'Cross Sell').length;
+  const mtdCutoff = useMemo(() => currentMonthStart(), []);
 
-  const totalPipelinePremium = deals.reduce((acc, deal) => acc + (deal.premiumAmount || 0), 0);
-  const totalClaims = claims.length;
-  const activeClaims = claims.filter(c => c.status !== 'Closed' && c.status !== 'Approved' && c.status !== 'Declined').length;
+  const boundMTD = useMemo(
+    () => deals.filter(d => isBound(d) && new Date(d.createdAt).getTime() >= mtdCutoff),
+    [deals, mtdCutoff],
+  );
 
-  // Pie chart data
-  const clientTypeData = [
-    { name: 'New Business', value: newBusinessCount },
-    { name: 'Renewals', value: renewalCount },
-    { name: 'Cross Sell', value: crossSellCount }
-  ].filter(d => d.value > 0);
-  const COLORS = ['#3b82f6', '#a855f7', '#10b981']; // blue, purple, emerald
+  const allBound = useMemo(() => deals.filter(isBound), [deals]);
 
-  // Bar chart data (deals by stage)
-  const newBizStages = ['Leads', 'Data Collection', 'Quote', 'Nego', 'Bind / Closed Won', 'Policy On Progress'];
-  const pipelineData = newBizStages.map(stage => {
+  const totalGWP = useMemo(
+    () => boundMTD.reduce((sum, d) => sum + (d.premiumAmount || 0), 0),
+    [boundMTD],
+  );
+
+  const totalNetIncome = useMemo(
+    () => boundMTD.reduce((sum, d) => sum + computeDealCommission(d).netIncome, 0),
+    [boundMTD],
+  );
+
+  const newBusinessMTD = useMemo(() => {
+    const items = boundMTD.filter(d => d.dealType === 'New Business');
     return {
-      name: stage,
-      value: deals.filter(d => d.statusStage === stage).length
+      count: items.length,
+      gwp: items.reduce((sum, d) => sum + (d.premiumAmount || 0), 0),
     };
-  });
+  }, [boundMTD]);
+
+  const outstanding = useMemo(() => {
+    const buckets = { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
+    let totalUnpaid = 0;
+    for (const d of allBound) {
+      if (!d.invoiceDate) continue;
+      if (d.paymentStatus === 'Paid') continue;
+      const age = daysSince(d.invoiceDate);
+      if (age == null || age < 0) continue;
+      const premium = d.premiumAmount || 0;
+      totalUnpaid += premium;
+      if (age <= 30) buckets['0-30'] += premium;
+      else if (age <= 60) buckets['31-60'] += premium;
+      else if (age <= 90) buckets['61-90'] += premium;
+      else buckets['90+'] += premium;
+    }
+    return { ...buckets, total: totalUnpaid };
+  }, [allBound]);
+
+  const claimsMetric = useMemo(() => {
+    const open = claims.filter(c => !TERMINAL_CLAIM_STATUSES.includes(c.status));
+    const totalEstimated = open.reduce((sum, c) => sum + (c.estimatedAmount || 0), 0);
+    return { count: open.length, totalEstimated };
+  }, [claims]);
+
+  const prospect = useMemo(() => {
+    const items = deals.filter(isProspect);
+    return {
+      count: items.length,
+      gwp: items.reduce((sum, d) => sum + (d.premiumAmount || 0), 0),
+    };
+  }, [deals]);
+
+  const trend = useMemo(() => {
+    const now = new Date();
+    const buckets: { key: string; label: string; gwp: number; ts: number }[] = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      buckets.push({ key, label: monthLabel(d.toISOString()), gwp: 0, ts: d.getTime() });
+    }
+    const map = new Map(buckets.map(b => [b.key, b]));
+    for (const d of allBound) {
+      const key = isoMonthKey(d.createdAt);
+      const b = map.get(key);
+      if (b) b.gwp += d.premiumAmount || 0;
+    }
+    return buckets;
+  }, [allBound]);
 
   return (
-    <div className="h-full flex flex-col p-8 bg-slate-50 overflow-y-auto relative">
-      <div className="mb-8 shrink-0">
-        <h2 className="text-xl font-bold text-slate-900 mb-1">Company Dashboard</h2>
-        <p className="text-[13px] text-slate-500">Overview of your firm's performance and risk exposure</p>
+    <div className="h-full overflow-y-auto bg-slate-50 p-8">
+      <div className="max-w-7xl mx-auto">
+        <div className="mb-6 flex items-end justify-between flex-wrap gap-4">
+          <div>
+            <h1 className="text-xl font-bold text-slate-900 mb-1">Dashboard</h1>
+            <p className="text-[13px] text-slate-500">
+              Month-to-date · {new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}
+            </p>
+          </div>
+          <div className="text-[11px] text-slate-500">
+            {clients.length} client{clients.length === 1 ? '' : 's'} · {deals.length} deal{deals.length === 1 ? '' : 's'} · {claims.length} claim{claims.length === 1 ? '' : 's'} total
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+          <MetricCard
+            label="Total Premium (GWP)"
+            primary={fmtIDR(totalGWP)}
+            secondary={`${boundMTD.length} bound deal${boundMTD.length === 1 ? '' : 's'} this month`}
+            icon={<Coins className="w-5 h-5" />}
+            tone="blue"
+            fullValue={fmtIDRFull(totalGWP)}
+          />
+          <MetricCard
+            label="Total Income (Net)"
+            primary={fmtIDR(totalNetIncome)}
+            secondary="Commission after discount, tax, agent cashback"
+            icon={<TrendingUp className="w-5 h-5" />}
+            tone="emerald"
+            fullValue={fmtIDRFull(totalNetIncome)}
+          />
+          <MetricCard
+            label="New Business"
+            primary={`${newBusinessMTD.count}`}
+            secondary={fmtIDR(newBusinessMTD.gwp) + ' GWP'}
+            icon={<Sparkles className="w-5 h-5" />}
+            tone="purple"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+          <MetricCard
+            label="Prospect Pipeline"
+            primary={`${prospect.count}`}
+            secondary={fmtIDR(prospect.gwp) + ' potential GWP'}
+            icon={<Target className="w-5 h-5" />}
+            tone="amber"
+          />
+          <MetricCard
+            label="Open Claims"
+            primary={`${claimsMetric.count}`}
+            secondary={'Est. ' + fmtIDR(claimsMetric.totalEstimated)}
+            icon={<ShieldAlert className="w-5 h-5" />}
+            tone="red"
+          />
+          <OutstandingCard data={outstanding} />
+        </div>
+
+        <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div className="text-[14px] font-bold text-slate-900">GWP by Month</div>
+              <div className="text-[11px] text-slate-500">Rolling 12 months · bound deals</div>
+            </div>
+            <div className="text-right">
+              <div className="text-[11px] text-slate-500">12-month total</div>
+              <div className="text-[14px] font-bold text-slate-900">{fmtIDR(trend.reduce((s, b) => s + b.gwp, 0))}</div>
+            </div>
+          </div>
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={trend} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                <YAxis
+                  tick={{ fontSize: 11, fill: '#64748b' }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => fmtIDR(Number(v))}
+                  width={70}
+                />
+                <RechartsTooltip
+                  formatter={(v: any) => fmtIDRFull(Number(v))}
+                  cursor={{ fill: '#f1f5f9' }}
+                  contentStyle={{ fontSize: 12, border: '1px solid #e2e8f0', borderRadius: 6 }}
+                />
+                <Bar dataKey="gwp" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <DataReadiness deals={deals} claims={claims} />
       </div>
-
-      {/* Top Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8 shrink-0">
-        <div className="bg-white p-6 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.05)] border border-slate-200">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-slate-500 text-[13px] uppercase tracking-wider">Registered Clients</h3>
-            <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
-              <Users className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="text-3xl font-bold text-slate-900">{totalClients}</div>
-          <p className="text-[12px] text-emerald-600 font-medium mt-2 flex items-center gap-1">
-            <TrendingUp className="w-3 h-3" /> System master records
-          </p>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.05)] border border-slate-200">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-slate-500 text-[13px] uppercase tracking-wider">Active Deals</h3>
-            <div className="w-10 h-10 rounded-full bg-purple-50 flex items-center justify-center text-purple-600">
-              <Briefcase className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="text-3xl font-bold text-slate-900">{deals.length}</div>
-          <p className="text-[12px] text-slate-500 font-medium mt-2">
-            Deals in pipeline
-          </p>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.05)] border border-slate-200">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-slate-500 text-[13px] uppercase tracking-wider">Estimated Premium</h3>
-            <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
-              <DollarSign className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="text-3xl font-bold text-slate-900">
-             {totalPipelinePremium > 1000000 ? `$${(totalPipelinePremium / 1000000).toFixed(1)}M` : `$${totalPipelinePremium.toLocaleString()}`}
-          </div>
-          <p className="text-[12px] text-emerald-600 font-medium mt-2 flex items-center gap-1">
-            <TrendingUp className="w-3 h-3" /> Potential revenue
-          </p>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.05)] border border-slate-200">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-slate-500 text-[13px] uppercase tracking-wider">Active Claims</h3>
-            <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-600">
-              <ShieldAlert className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="text-3xl font-bold text-slate-900">{activeClaims}</div>
-          <p className="text-[12px] text-slate-500 font-medium mt-2">
-            Out of {totalClaims} total claims
-          </p>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.05)] border border-slate-200">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-slate-500 text-[13px] uppercase tracking-wider">Total Exposure (TSI)</h3>
-            <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center text-amber-600">
-              <Briefcase className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="text-3xl font-bold text-slate-900">
-            {deals.reduce((acc, deal) => acc + (deal.sumInsured || 0), 0) > 1000000 ? `$${(deals.reduce((acc, deal) => acc + (deal.sumInsured || 0), 0) / 1000000).toFixed(1)}M` : `$${deals.reduce((acc, deal) => acc + (deal.sumInsured || 0), 0).toLocaleString()}`}
-          </div>
-          <p className="text-[12px] text-slate-500 font-medium mt-2">
-            Total Sum Insured pipeline
-          </p>
-        </div>
-      </div>
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-8">
-        <div className="bg-white p-6 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.05)] border border-slate-200">
-           <h3 className="font-bold text-slate-900 mb-6">Deals by Stage</h3>
-           <div className="h-[300px] w-full">
-             <ResponsiveContainer width="100%" height="100%">
-               <BarChart data={pipelineData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                 <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} interval={0} angle={-45} textAnchor="end" />
-                 <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} />
-                 <RechartsTooltip 
-                   cursor={{ fill: '#f8fafc' }} 
-                   contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
-                 />
-                 <Bar dataKey="value" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-               </BarChart>
-             </ResponsiveContainer>
-           </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.05)] border border-slate-200">
-           <h3 className="font-bold text-slate-900 mb-6">Deal Type Distribution</h3>
-           {clientTypeData.length === 0 ? (
-             <div className="h-[300px] flex items-center justify-center text-slate-500 text-sm">
-               No deal data available to chart
-             </div>
-           ) : (
-             <div className="h-[300px] w-full flex items-center justify-center">
-               <ResponsiveContainer width="100%" height="100%">
-                 <PieChart>
-                   <Pie
-                     data={clientTypeData}
-                     cx="50%"
-                     cy="50%"
-                     innerRadius={80}
-                     outerRadius={110}
-                     paddingAngle={5}
-                     dataKey="value"
-                     stroke="none"
-                   >
-                     {clientTypeData.map((entry, index) => (
-                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                     ))}
-                   </Pie>
-                   <RechartsTooltip 
-                     contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
-                   />
-                   <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '13px' }}/>
-                 </PieChart>
-               </ResponsiveContainer>
-             </div>
-           )}
-        </div>
-      </div>
-
     </div>
   );
 };
 
+const MetricCard: React.FC<{
+  label: string;
+  primary: string;
+  secondary?: string;
+  icon: React.ReactNode;
+  tone: 'blue' | 'emerald' | 'purple' | 'amber' | 'red';
+  fullValue?: string;
+}> = ({ label, primary, secondary, icon, tone, fullValue }) => {
+  const toneClass = {
+    blue: 'bg-blue-50 text-blue-600',
+    emerald: 'bg-emerald-50 text-emerald-600',
+    purple: 'bg-purple-50 text-purple-600',
+    amber: 'bg-amber-50 text-amber-600',
+    red: 'bg-red-50 text-red-600',
+  }[tone];
+  return (
+    <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-5">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{label}</div>
+        <div className={cn('w-8 h-8 rounded-full flex items-center justify-center', toneClass)}>{icon}</div>
+      </div>
+      <div className="text-2xl font-bold text-slate-900 tabular-nums" title={fullValue}>{primary}</div>
+      {secondary && <div className="text-[12px] text-slate-500 mt-1">{secondary}</div>}
+    </div>
+  );
+};
+
+const OutstandingCard: React.FC<{ data: { '0-30': number; '31-60': number; '61-90': number; '90+': number; total: number } }> = ({ data }) => {
+  const has90Plus = data['90+'] > 0;
+  return (
+    <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-5">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Outstanding 90+ Days</div>
+        <div className={cn('w-8 h-8 rounded-full flex items-center justify-center', has90Plus ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-400')}>
+          <Clock className="w-5 h-5" />
+        </div>
+      </div>
+      <div className={cn('text-2xl font-bold tabular-nums', has90Plus ? 'text-red-700' : 'text-slate-900')} title={fmtIDRFull(data['90+'])}>
+        {fmtIDR(data['90+'])}
+      </div>
+      <div className="text-[12px] text-slate-500 mt-1">Total unpaid: {fmtIDR(data.total)}</div>
+      <div className="mt-3 pt-3 border-t border-slate-100 grid grid-cols-3 gap-2 text-center">
+        <AgeBucket label="0-30" amount={data['0-30']} />
+        <AgeBucket label="31-60" amount={data['31-60']} />
+        <AgeBucket label="61-90" amount={data['61-90']} />
+      </div>
+    </div>
+  );
+};
+
+const AgeBucket: React.FC<{ label: string; amount: number }> = ({ label, amount }) => (
+  <div>
+    <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">{label} days</div>
+    <div className="text-[12px] font-semibold text-slate-700 tabular-nums mt-0.5">{fmtIDR(amount)}</div>
+  </div>
+);
+
+const DataReadiness: React.FC<{ deals: any[]; claims: any[] }> = ({ deals }) => {
+  const noPremium = deals.filter(d => (d.statusStage === 'Bind / Closed Won' || d.statusStage === 'Policy On Progress') && !d.premiumAmount).length;
+  const noCommission = deals.filter(d => (d.statusStage === 'Bind / Closed Won' || d.statusStage === 'Policy On Progress') && (!d.commission || !d.commission.baseRate)).length;
+  const noInvoice = deals.filter(d => (d.statusStage === 'Bind / Closed Won' || d.statusStage === 'Policy On Progress') && !d.invoiceDate).length;
+
+  if (noPremium === 0 && noCommission === 0 && noInvoice === 0) return null;
+  return (
+    <div className="mt-6 bg-amber-50 border border-amber-200 rounded-lg p-4 text-[12px] text-amber-900">
+      <div className="font-semibold mb-1">Data tip — for accurate metrics</div>
+      <ul className="space-y-0.5 list-disc list-inside text-[11px]">
+        {noPremium > 0 && <li>{noPremium} bound deal{noPremium === 1 ? '' : 's'} missing premium amount → not counted in GWP</li>}
+        {noCommission > 0 && <li>{noCommission} bound deal{noCommission === 1 ? '' : 's'} missing commission rate → not counted in Total Income</li>}
+        {noInvoice > 0 && <li>{noInvoice} bound deal{noInvoice === 1 ? '' : 's'} missing invoice date → not counted in Outstanding receivables</li>}
+      </ul>
+    </div>
+  );
+};
