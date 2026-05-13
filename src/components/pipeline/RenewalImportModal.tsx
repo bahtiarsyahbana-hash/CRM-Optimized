@@ -7,7 +7,7 @@ import {
 } from '../../utils/renewalImporter';
 import {
   X, Download, Upload, AlertCircle, CheckCircle2, FileSpreadsheet, ArrowRight,
-  Building2, FileText, Users,
+  Building2, FileText, Users, Pencil,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
@@ -17,6 +17,10 @@ interface Props {
 }
 
 type Stage = 'select' | 'preview' | 'importing';
+
+const STAGE_OPTIONS = [
+  'Leads', 'Data Collection', 'Quote', 'Nego', 'Bind / Closed Won', 'Policy On Progress', 'Lost',
+] as const;
 
 export const RenewalImportModal: React.FC<Props> = ({ onClose }) => {
   const { clients, addClient, addDeal } = useData();
@@ -28,12 +32,71 @@ export const RenewalImportModal: React.FC<Props> = ({ onClose }) => {
   const [parseError, setParseError] = useState<string | null>(null);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
 
+  // Review controls
+  const [skippedGroups, setSkippedGroups] = useState<Set<string>>(new Set());
+  const [skippedDeals, setSkippedDeals] = useState<Set<string>>(new Set());
+  const [dealEdits, setDealEdits] = useState<Record<string, any>>({});
+  const [editingDeal, setEditingDeal] = useState<string | null>(null);
+  const [draft, setDraft] = useState<any>({});
+
   const groups = parseResult?.groups ?? [];
   const invalidRows = parseResult?.invalid ?? [];
-
-  const newClientGroups = groups.filter(g => g.existingClientId === null);
   const existingClientGroups = groups.filter(g => g.existingClientId !== null);
-  const totalDeals = groups.reduce((sum, g) => sum + g.deals.length, 0);
+
+  // Stable key helpers
+  const gk = (name: string) => name.trim().toLowerCase();
+  const dk = (groupName: string, idx: number) => `${gk(groupName)}::${idx}`;
+
+  // Live counts reflecting skip choices
+  const totalActiveGroups = groups.filter(g => !skippedGroups.has(gk(g.insuredName))).length;
+  const totalActiveDeals = groups.reduce((sum, g) => {
+    if (skippedGroups.has(gk(g.insuredName))) return sum;
+    return sum + g.deals.filter((_, i) => !skippedDeals.has(dk(g.insuredName, i))).length;
+  }, 0);
+
+  const toggleGroup = (name: string) => {
+    const key = gk(name);
+    setSkippedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleDeal = (groupName: string, idx: number) => {
+    const key = dk(groupName, idx);
+    setSkippedDeals(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const startEdit = (groupName: string, idx: number, deal: any) => {
+    const key = dk(groupName, idx);
+    setEditingDeal(key);
+    setDraft({ ...deal, ...(dealEdits[key] || {}) });
+  };
+
+  const saveEdit = (key: string) => {
+    setDealEdits(prev => ({ ...prev, [key]: { ...draft } }));
+    setEditingDeal(null);
+  };
+
+  const isoToDateInput = (iso?: string) => {
+    if (!iso) return '';
+    try { return new Date(iso).toISOString().split('T')[0]; } catch { return ''; }
+  };
+  const dateInputToIso = (v: string) => v ? new Date(v).toISOString() : '';
+
+  const resetReviewState = () => {
+    setSkippedGroups(new Set());
+    setSkippedDeals(new Set());
+    setDealEdits({});
+    setEditingDeal(null);
+    setDraft({});
+    setExpandedGroup(null);
+  };
 
   const handleFile = async (file: File) => {
     setParseError(null);
@@ -41,6 +104,7 @@ export const RenewalImportModal: React.FC<Props> = ({ onClose }) => {
     try {
       const result = await parseRenewalFile(file, clients);
       setParseResult(result);
+      resetReviewState();
       setStage('preview');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not parse the file.';
@@ -62,8 +126,12 @@ export const RenewalImportModal: React.FC<Props> = ({ onClose }) => {
     let clientsCreated = 0;
     let dealsCreated = 0;
 
+    const importGroups = groups.filter(g => !skippedGroups.has(gk(g.insuredName)));
+    const importNewClients = importGroups.filter(g => g.existingClientId === null);
+    const importExisting = importGroups.filter(g => g.existingClientId !== null);
+
     // PHASE 1: Create all new clients first
-    for (const group of newClientGroups) {
+    for (const group of importNewClients) {
       addClient(group.clientData);
       clientsCreated++;
     }
@@ -73,14 +141,17 @@ export const RenewalImportModal: React.FC<Props> = ({ onClose }) => {
     const byName = new Map<string, string>();
     for (const c of latestClients) byName.set((c.companyName || '').trim().toLowerCase(), c.id);
 
-    // PHASE 2: Create deals for each group, pointing at the correct client id
-    for (const group of groups) {
-      const clientId = group.existingClientId ?? byName.get(group.insuredName.trim().toLowerCase());
+    // PHASE 2: Create deals for each included group, applying any edits
+    for (const group of importGroups) {
+      const clientId = group.existingClientId ?? byName.get(gk(group.insuredName));
       if (!clientId) {
         console.error('Could not resolve client id for', group.insuredName);
         continue;
       }
-      for (const deal of group.deals) {
+      for (let i = 0; i < group.deals.length; i++) {
+        const dealK = dk(group.insuredName, i);
+        if (skippedDeals.has(dealK)) continue;
+        const deal = { ...group.deals[i], ...(dealEdits[dealK] || {}) };
         addDeal({
           clientId,
           dealType: deal.dealType,
@@ -104,8 +175,8 @@ export const RenewalImportModal: React.FC<Props> = ({ onClose }) => {
 
     toast.success(
       `Imported ${dealsCreated} deal${dealsCreated === 1 ? '' : 's'} ` +
-      `across ${groups.length} client${groups.length === 1 ? '' : 's'} ` +
-      `(${clientsCreated} new, ${existingClientGroups.length} existing)` +
+      `across ${importGroups.length} client${importGroups.length === 1 ? '' : 's'} ` +
+      `(${clientsCreated} new, ${importExisting.length} existing)` +
       (invalidRows.length > 0 ? `. ${invalidRows.length} row${invalidRows.length === 1 ? '' : 's'} had errors and were skipped.` : '.'),
       { duration: 6000 }
     );
@@ -205,67 +276,266 @@ export const RenewalImportModal: React.FC<Props> = ({ onClose }) => {
           {stage === 'preview' && parseResult && (
             <div className="space-y-5">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <SummaryCard count={groups.length} label="Clients" description={`${newClientGroups.length} new · ${existingClientGroups.length} existing`} tone="green" icon={<Users className="w-4 h-4" />} />
-                <SummaryCard count={totalDeals} label="Deals" description="To be created" tone="green" icon={<FileText className="w-4 h-4" />} />
-                <SummaryCard count={parseResult.totalRowsProcessed - invalidRows.length} label="Rows OK" description={`of ${parseResult.totalRowsProcessed}`} tone="green" icon={<CheckCircle2 className="w-4 h-4" />} />
-                <SummaryCard count={invalidRows.length} label="Errors" description="Will be skipped" tone="red" icon={<AlertCircle className="w-4 h-4" />} />
+                <SummaryCard
+                  count={totalActiveGroups}
+                  label="Clients"
+                  description={`of ${groups.length} · ${groups.filter(g => g.existingClientId === null && !skippedGroups.has(gk(g.insuredName))).length} new`}
+                  tone="green"
+                  icon={<Users className="w-4 h-4" />}
+                />
+                <SummaryCard
+                  count={totalActiveDeals}
+                  label="Deals"
+                  description="To be imported"
+                  tone="green"
+                  icon={<FileText className="w-4 h-4" />}
+                />
+                <SummaryCard
+                  count={parseResult.totalRowsProcessed - invalidRows.length}
+                  label="Rows OK"
+                  description={`of ${parseResult.totalRowsProcessed}`}
+                  tone="green"
+                  icon={<CheckCircle2 className="w-4 h-4" />}
+                />
+                <SummaryCard
+                  count={invalidRows.length}
+                  label="Errors"
+                  description="Will be skipped"
+                  tone="red"
+                  icon={<AlertCircle className="w-4 h-4" />}
+                />
               </div>
 
               {groups.length > 0 && (
-                <Section title={`Clients & their deals (${groups.length} clients, ${totalDeals} deals)`} tone="green">
-                  <div className="max-h-[400px] overflow-y-auto divide-y divide-emerald-100">
+                <Section
+                  title={`Review — ${totalActiveGroups} of ${groups.length} client${groups.length !== 1 ? 's' : ''}, ${totalActiveDeals} deal${totalActiveDeals !== 1 ? 's' : ''} selected`}
+                  tone="green"
+                >
+                  <div className="px-3 py-2 bg-blue-50/60 border-b border-blue-100 text-[11px] text-blue-800">
+                    Click <strong>Skip / Include</strong> per client or per deal · Click <Pencil className="w-3 h-3 inline mx-0.5" /> to edit a deal's values before import
+                  </div>
+                  <div className="max-h-[420px] overflow-y-auto divide-y divide-emerald-100">
                     {groups.map(g => {
                       const isExpanded = expandedGroup === g.insuredName;
                       const isExisting = g.existingClientId !== null;
+                      const isGroupSkipped = skippedGroups.has(gk(g.insuredName));
+
                       return (
-                        <div key={g.insuredName}>
-                          <button
-                            type="button"
-                            onClick={() => setExpandedGroup(isExpanded ? null : g.insuredName)}
-                            className="w-full px-3 py-2.5 flex items-center gap-3 hover:bg-emerald-50/50 text-left transition-colors"
-                          >
-                            <Building2 className="w-4 h-4 text-emerald-700 shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <div className="text-[13px] font-semibold text-slate-900 truncate">{g.insuredName}</div>
-                                {isExisting ? (
-                                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 uppercase">existing</span>
-                                ) : (
-                                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-200 uppercase">new</span>
-                                )}
+                        <div key={g.insuredName} className={cn('transition-opacity', isGroupSkipped && 'opacity-50')}>
+                          {/* Group header */}
+                          <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-emerald-50/30">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedGroup(isExpanded ? null : g.insuredName)}
+                              className="flex-1 flex items-center gap-3 text-left min-w-0"
+                            >
+                              <Building2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <div className={cn('text-[13px] font-semibold text-slate-900 truncate', isGroupSkipped && 'line-through text-slate-400')}>
+                                    {g.insuredName}
+                                  </div>
+                                  {isExisting
+                                    ? <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 uppercase shrink-0">existing</span>
+                                    : <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-200 uppercase shrink-0">new</span>
+                                  }
+                                </div>
+                                <div className="text-[11px] text-slate-500 truncate">
+                                  {g.deals.length} deal{g.deals.length !== 1 ? 's' : ''} · rows {g.sourceRowNumbers.join(', ')}
+                                </div>
                               </div>
-                              <div className="text-[11px] text-slate-500 truncate">
-                                {g.deals.length} deal{g.deals.length === 1 ? '' : 's'} · rows {g.sourceRowNumbers.join(', ')}
-                              </div>
-                            </div>
-                            <ArrowRight className={cn('w-4 h-4 text-slate-400 shrink-0 transition-transform', isExpanded && 'rotate-90')} />
-                          </button>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => toggleGroup(g.insuredName)}
+                              className={cn(
+                                'shrink-0 px-2.5 py-1 text-[11px] font-semibold rounded border transition-colors',
+                                isGroupSkipped
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                  : 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100',
+                              )}
+                            >
+                              {isGroupSkipped ? 'Include' : 'Skip'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setExpandedGroup(isExpanded ? null : g.insuredName)}
+                              className="p-1 text-slate-400 hover:text-slate-600"
+                            >
+                              <ArrowRight className={cn('w-4 h-4 transition-transform', isExpanded && 'rotate-90')} />
+                            </button>
+                          </div>
+
+                          {/* Deal table */}
                           {isExpanded && (
-                            <div className="bg-emerald-50/30 px-3 pb-3 pl-10">
+                            <div className="bg-emerald-50/20 px-3 pb-3 pl-10">
                               <table className="w-full text-[11px]">
                                 <thead>
-                                  <tr className="text-slate-600">
+                                  <tr className="text-slate-500">
                                     <th className="text-left py-1.5 font-semibold">Type of Insurance</th>
                                     <th className="text-right py-1.5 font-semibold">Sum Insured</th>
                                     <th className="text-right py-1.5 font-semibold">Premium</th>
                                     <th className="text-left py-1.5 font-semibold pl-2">Period</th>
                                     <th className="text-left py-1.5 font-semibold pl-2">Insurance Co.</th>
                                     <th className="text-left py-1.5 font-semibold pl-2">Stage</th>
+                                    <th className="py-1.5 w-16"></th>
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {g.deals.map((d, i) => (
-                                    <tr key={i} className="border-t border-emerald-100/60">
-                                      <td className="py-1 text-slate-800">{d.typeOfInsurance}</td>
-                                      <td className="py-1 text-right font-mono text-slate-800">{d.currency} {formatNumber(d.sumInsured)}</td>
-                                      <td className="py-1 text-right font-mono text-slate-700">{formatNumber(d.premiumAmount)}</td>
-                                      <td className="py-1 text-slate-600 pl-2 whitespace-nowrap">{formatDate(d.periodStart)} → {formatDate(d.periodEnd)}</td>
-                                      <td className="py-1 text-slate-700 pl-2">{d.insuranceCompany || '-'}</td>
-                                      <td className="py-1 text-slate-700 pl-2">{d.statusStage}</td>
-                                    </tr>
-                                  ))}
+                                  {g.deals.map((d, i) => {
+                                    const dealK = dk(g.insuredName, i);
+                                    const isDealSkipped = skippedDeals.has(dealK) || isGroupSkipped;
+                                    const isEditing = editingDeal === dealK;
+                                    const effective = { ...d, ...(dealEdits[dealK] || {}) };
+                                    const isEdited = !!dealEdits[dealK];
+
+                                    if (isEditing) {
+                                      return (
+                                        <tr key={i} className="border-t border-blue-100">
+                                          <td colSpan={7} className="p-0">
+                                            <div className="bg-blue-50 border border-blue-200 rounded-md m-1 p-3 space-y-3">
+                                              <div className="text-[11px] font-bold text-blue-700">Editing deal {i + 1} of {g.deals.length}</div>
+                                              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                                <div>
+                                                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Type of Insurance</label>
+                                                  <input
+                                                    type="text"
+                                                    value={draft.typeOfInsurance || ''}
+                                                    onChange={e => setDraft((p: any) => ({ ...p, typeOfInsurance: e.target.value }))}
+                                                    className="w-full px-2 py-1 text-[12px] border border-slate-200 rounded bg-white focus:outline-none focus:border-blue-500"
+                                                  />
+                                                </div>
+                                                <div>
+                                                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Premium</label>
+                                                  <input
+                                                    type="number"
+                                                    value={draft.premiumAmount ?? ''}
+                                                    onChange={e => setDraft((p: any) => ({ ...p, premiumAmount: e.target.value ? parseFloat(e.target.value) : undefined }))}
+                                                    className="w-full px-2 py-1 text-[12px] border border-slate-200 rounded bg-white focus:outline-none focus:border-blue-500"
+                                                  />
+                                                </div>
+                                                <div>
+                                                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Insurance Company</label>
+                                                  <input
+                                                    type="text"
+                                                    value={draft.insuranceCompany || ''}
+                                                    onChange={e => setDraft((p: any) => ({ ...p, insuranceCompany: e.target.value || undefined }))}
+                                                    className="w-full px-2 py-1 text-[12px] border border-slate-200 rounded bg-white focus:outline-none focus:border-blue-500"
+                                                  />
+                                                </div>
+                                                <div>
+                                                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Period Start</label>
+                                                  <input
+                                                    type="date"
+                                                    value={isoToDateInput(draft.periodStart)}
+                                                    onChange={e => setDraft((p: any) => ({ ...p, periodStart: dateInputToIso(e.target.value) }))}
+                                                    className="w-full px-2 py-1 text-[12px] border border-slate-200 rounded bg-white focus:outline-none focus:border-blue-500"
+                                                  />
+                                                </div>
+                                                <div>
+                                                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Period End</label>
+                                                  <input
+                                                    type="date"
+                                                    value={isoToDateInput(draft.periodEnd)}
+                                                    onChange={e => setDraft((p: any) => ({ ...p, periodEnd: dateInputToIso(e.target.value) }))}
+                                                    className="w-full px-2 py-1 text-[12px] border border-slate-200 rounded bg-white focus:outline-none focus:border-blue-500"
+                                                  />
+                                                </div>
+                                                <div>
+                                                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Stage</label>
+                                                  <select
+                                                    value={draft.statusStage || 'Policy On Progress'}
+                                                    onChange={e => setDraft((p: any) => ({ ...p, statusStage: e.target.value }))}
+                                                    className="w-full px-2 py-1 text-[12px] border border-slate-200 rounded bg-white focus:outline-none focus:border-blue-500"
+                                                  >
+                                                    {STAGE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                                                  </select>
+                                                </div>
+                                                <div className="col-span-2 md:col-span-3">
+                                                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Notes</label>
+                                                  <input
+                                                    type="text"
+                                                    value={draft.notes || ''}
+                                                    onChange={e => setDraft((p: any) => ({ ...p, notes: e.target.value || undefined }))}
+                                                    className="w-full px-2 py-1 text-[12px] border border-slate-200 rounded bg-white focus:outline-none focus:border-blue-500"
+                                                  />
+                                                </div>
+                                              </div>
+                                              <div className="flex gap-2 justify-end pt-1 border-t border-blue-100">
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setEditingDeal(null)}
+                                                  className="px-3 py-1 text-[12px] font-semibold text-slate-600 hover:bg-slate-100 border border-slate-200 rounded transition-colors"
+                                                >
+                                                  Cancel
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => saveEdit(dealK)}
+                                                  className="px-3 py-1 text-[12px] font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded transition-colors"
+                                                >
+                                                  Save changes
+                                                </button>
+                                              </div>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      );
+                                    }
+
+                                    return (
+                                      <tr
+                                        key={i}
+                                        className={cn(
+                                          'border-t border-emerald-100/60',
+                                          isDealSkipped && 'opacity-40',
+                                          isEdited && !isDealSkipped && 'bg-blue-50/40',
+                                        )}
+                                      >
+                                        <td className={cn('py-1 text-slate-800', isDealSkipped && 'line-through')}>{effective.typeOfInsurance}</td>
+                                        <td className="py-1 text-right font-mono text-slate-800 whitespace-nowrap">{effective.currency} {formatNumber(effective.sumInsured)}</td>
+                                        <td className="py-1 text-right font-mono text-slate-700">{formatNumber(effective.premiumAmount)}</td>
+                                        <td className="py-1 text-slate-600 pl-2 whitespace-nowrap">{formatDate(effective.periodStart)} → {formatDate(effective.periodEnd)}</td>
+                                        <td className="py-1 text-slate-700 pl-2">{effective.insuranceCompany || '-'}</td>
+                                        <td className="py-1 text-slate-700 pl-2">{effective.statusStage}</td>
+                                        <td className="py-1 pl-2 text-right whitespace-nowrap">
+                                          {!isGroupSkipped && (
+                                            <span className="inline-flex items-center gap-1">
+                                              <button
+                                                type="button"
+                                                title="Edit deal"
+                                                onClick={() => startEdit(g.insuredName, i, d)}
+                                                disabled={skippedDeals.has(dealK)}
+                                                className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                              >
+                                                <Pencil className="w-3 h-3" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                title={skippedDeals.has(dealK) ? 'Include this deal' : 'Skip this deal'}
+                                                onClick={() => toggleDeal(g.insuredName, i)}
+                                                className={cn(
+                                                  'px-1.5 py-0.5 text-[11px] font-bold rounded border transition-colors',
+                                                  skippedDeals.has(dealK)
+                                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                                    : 'bg-red-50 text-red-500 border-red-200 hover:bg-red-100',
+                                                )}
+                                              >
+                                                {skippedDeals.has(dealK) ? '+' : '−'}
+                                              </button>
+                                            </span>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
                                 </tbody>
                               </table>
+                              {g.deals.some((_, i) => dealEdits[dk(g.insuredName, i)]) && (
+                                <div className="mt-1 text-[10px] text-blue-600">
+                                  {g.deals.filter((_, i) => dealEdits[dk(g.insuredName, i)]).length} deal{g.deals.filter((_, i) => dealEdits[dk(g.insuredName, i)]).length !== 1 ? 's' : ''} edited
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -313,20 +583,22 @@ export const RenewalImportModal: React.FC<Props> = ({ onClose }) => {
         <div className="p-4 border-t border-slate-100 bg-white flex justify-between gap-3 shrink-0">
           {stage === 'preview' && (
             <button
-              onClick={() => { setStage('select'); setParseResult(null); setFileName(''); setExpandedGroup(null); }}
+              onClick={() => { setStage('select'); setParseResult(null); setFileName(''); resetReviewState(); }}
               className="px-4 py-2 text-[13px] font-semibold text-slate-600 hover:bg-slate-50 border border-slate-200 rounded-md transition-colors"
             >
               ← Back
             </button>
           )}
           <div className="flex gap-3 ml-auto">
-            <button onClick={onClose} className="px-5 py-2 text-[13px] font-semibold text-slate-600 hover:bg-slate-50 border border-slate-200 rounded-md transition-colors">Cancel</button>
-            {stage === 'preview' && parseResult && groups.length > 0 && (
+            <button onClick={onClose} className="px-5 py-2 text-[13px] font-semibold text-slate-600 hover:bg-slate-50 border border-slate-200 rounded-md transition-colors">
+              Cancel
+            </button>
+            {stage === 'preview' && parseResult && totalActiveDeals > 0 && (
               <button
                 onClick={performImport}
                 className="px-5 py-2 text-[13px] font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors shadow-sm inline-flex items-center gap-2"
               >
-                Import {totalDeals} deal(s) across {groups.length} client(s)
+                Import {totalActiveDeals} deal{totalActiveDeals !== 1 ? 's' : ''} across {totalActiveGroups} client{totalActiveGroups !== 1 ? 's' : ''}
                 <ArrowRight className="w-4 h-4" />
               </button>
             )}
@@ -337,7 +609,13 @@ export const RenewalImportModal: React.FC<Props> = ({ onClose }) => {
   );
 };
 
-const SummaryCard: React.FC<{ count: number; label: string; description: string; tone: 'green' | 'amber' | 'red'; icon: React.ReactNode }> = ({ count, label, description, tone, icon }) => {
+const SummaryCard: React.FC<{
+  count: number;
+  label: string;
+  description: string;
+  tone: 'green' | 'amber' | 'red';
+  icon: React.ReactNode;
+}> = ({ count, label, description, tone, icon }) => {
   const toneClasses = {
     green: 'bg-emerald-50 border-emerald-200 text-emerald-800',
     amber: 'bg-amber-50 border-amber-200 text-amber-800',
