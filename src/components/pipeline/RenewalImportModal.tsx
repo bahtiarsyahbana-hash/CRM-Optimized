@@ -96,6 +96,7 @@ export const RenewalImportModal: React.FC<Props> = ({ onClose }) => {
           periodEnd: deal.periodEnd,
           statusStage: deal.statusStage,
           notes: deal.notes,
+          qq: deal.qq,
         });
         dealsCreated++;
       }

@@ -33,6 +33,11 @@ export const RENEWAL_COLUMNS = [
   'Deal Type',
   'Stage',
   'Notes',
+  'QQ 1',
+  'QQ 2',
+  'QQ 3',
+  'QQ 4',
+  'QQ 5',
 ] as const;
 
 const REQUIRED_COLUMNS = [
@@ -92,6 +97,7 @@ export interface RenewalRow {
     dealType: DealType;
     statusStage: DealStage;
     notes?: string;
+    qq?: string[];
   };
 }
 
@@ -143,6 +149,7 @@ export function downloadRenewalTemplate(): void {
       'Renewal',
       'Policy On Progress',
       'Annual renewal — relationship since 2022',
+      '', '', '', '', '',
     ],
     [
       'PT Vertex Global Indonesia',
@@ -166,6 +173,7 @@ export function downloadRenewalTemplate(): void {
       'Renewal',
       'Policy On Progress',
       '',
+      'PT Mitra Logistik Nusantara', '', '', '', '',
     ],
     [],
     ['NOTE: Delete the two example rows above before importing.'],
@@ -174,6 +182,7 @@ export function downloadRenewalTemplate(): void {
     ['Dates: DD/MM/YYYY or "1 Januari 2026" both work. Numbers can be "100,000,000" or "Rp 100M".'],
     [`Stage must be one of: ${VALID_STAGES.join(', ')} (defaults to "Policy On Progress" if blank).`],
     [`Deal Type must be one of: ${VALID_DEAL_TYPES.join(', ')} (defaults to "Renewal" if blank).`],
+    ['NOTE: QQ 1–5 = additional named parties on the policy (QQ = atas nama). All optional. Max 5.'],
   ];
 
   const ws = XLSX.utils.aoa_to_sheet(data);
@@ -182,6 +191,7 @@ export function downloadRenewalTemplate(): void {
     { wch: 20 }, { wch: 10 }, { wch: 18 }, { wch: 24 }, { wch: 22 },
     { wch: 34 }, { wch: 36 }, { wch: 20 }, { wch: 28 }, { wch: 18 },
     { wch: 18 }, { wch: 22 }, { wch: 22 }, { wch: 14 }, { wch: 20 }, { wch: 30 },
+    { wch: 26 }, { wch: 26 }, { wch: 26 }, { wch: 26 }, { wch: 26 },
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, 'Renewals');
@@ -322,6 +332,10 @@ export async function parseRenewalFile(file: File, existingClients: Client[]): P
       errors.push(`PIC Email "${picEmail}" doesn't look valid`);
     }
 
+    const qqEntries = (['QQ 1', 'QQ 2', 'QQ 3', 'QQ 4', 'QQ 5'] as const)
+      .map(col => get(col))
+      .filter(v => v !== '');
+
     if (errors.length > 0) {
       invalid.push({ rowNumber, rawInsuredName: insuredName, errors });
       continue;
@@ -354,6 +368,7 @@ export async function parseRenewalFile(file: File, existingClients: Client[]): P
         dealType,
         statusStage,
         notes: get('Notes') || undefined,
+        qq: qqEntries.length > 0 ? qqEntries : undefined,
       },
     });
   }
