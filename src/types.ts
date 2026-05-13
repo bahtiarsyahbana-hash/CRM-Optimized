@@ -84,6 +84,8 @@ export interface Deal {
   periodEnd?: string;
   coverNoteNumber?: string;
   originalPolicyFile?: string;
+  /** Additional named parties on the policy (QQ = atas nama). Max 5. */
+  qq?: string[];
   /** Commission breakdown — added in v0.2. Optional for backward compat. */
   commission?: DealCommission;
   /** Date the invoice was sent to the client (ISO). Drives receivables aging. */

@@ -34,6 +34,7 @@ export const DealDetailForm = ({
   const [riskLocation, setRiskLocation] = useState(deal?.riskLocation || '');
   const [riskDetail, setRiskDetail] = useState(deal?.riskDetail || '');
   const [notes, setNotes] = useState(deal?.notes || '');
+  const [qqList, setQqList] = useState<string[]>(deal?.qq || []);
 
   const [baseRate, setBaseRate] = useState<string>(
     deal?.commission?.baseRate != null ? String(deal.commission.baseRate) : ''
@@ -129,6 +130,7 @@ export const DealDetailForm = ({
       riskLocation,
       riskDetail,
       notes,
+      qq: qqList.filter(q => q.trim()).length > 0 ? qqList.filter(q => q.trim()) : undefined,
       commission: showCommissionSection ? {
         baseRate: baseRate !== '' ? parseFloat(baseRate) : undefined,
         discountPercent: discountPercent !== '' ? parseFloat(discountPercent) : undefined,
@@ -196,6 +198,56 @@ export const DealDetailForm = ({
                     </select>
                   )}
                 </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-[12px] font-semibold text-slate-600">
+                      QQ <span className="text-slate-400 font-normal">(atas nama — additional named parties)</span>
+                    </label>
+                    {qqList.length < 5 && (
+                      <button
+                        type="button"
+                        onClick={() => setQqList([...qqList, ''])}
+                        className="text-[12px] font-medium text-blue-600 hover:text-blue-700"
+                      >
+                        + Add QQ
+                      </button>
+                    )}
+                  </div>
+                  {qqList.length === 0 ? (
+                    <p className="text-[12px] text-slate-400 italic">No QQ parties added.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {qqList.map((entry, i) => (
+                        <div key={i} className="flex gap-2 items-center">
+                          <span className="text-[11px] font-bold text-slate-400 w-6 shrink-0 text-center">QQ</span>
+                          <input
+                            type="text"
+                            value={entry}
+                            onChange={e => {
+                              const next = [...qqList];
+                              next[i] = e.target.value;
+                              setQqList(next);
+                            }}
+                            placeholder={`Party ${i + 1} name`}
+                            className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setQqList(qqList.filter((_, j) => j !== i))}
+                            className="p-2 text-slate-400 hover:text-red-500 bg-slate-50 hover:bg-red-50 border border-slate-200 rounded-md transition-colors shrink-0"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      {qqList.length >= 5 && (
+                        <p className="text-[11px] text-slate-400">Maximum 5 QQ parties reached.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
               </div>
             </div>
 
