@@ -9,6 +9,7 @@ export const COMMISSION_DEFAULT_BY_LOB: Record<LineOfBusiness, number> = {
   Trading: 15,
   'Financial Institution': 15,
   Property: 15,
+  Individual: 15,
   Others: 15,
 };
 

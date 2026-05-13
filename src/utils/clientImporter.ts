@@ -15,7 +15,7 @@ export const IMPORT_COLUMNS = [
   'PIC Phone',
 ] as const;
 
-const VALID_LOB: LineOfBusiness[] = ['Manufacture', 'Trading', 'Financial Institution', 'Property', 'Others'];
+const VALID_LOB: LineOfBusiness[] = ['Manufacture', 'Trading', 'Financial Institution', 'Property', 'Individual', 'Others'];
 
 /** Loose case-insensitive LOB synonyms users tend to write. */
 const LOB_SYNONYMS: Record<string, LineOfBusiness> = {
@@ -31,6 +31,8 @@ const LOB_SYNONYMS: Record<string, LineOfBusiness> = {
   'bank': 'Financial Institution',
   'property': 'Property',
   'real estate': 'Property',
+  'individual': 'Individual',
+  'personal': 'Individual',
   'others': 'Others',
   'other': 'Others',
 };
@@ -98,7 +100,7 @@ export function downloadImportTemplate(): void {
     // Notes spacer + instructions row
     [],
     ['NOTE: Delete the two example rows above before importing. Required columns: Company Name, Line of Business, Business Occupation.'],
-    ['Line of Business must be one of: Manufacture, Trading, Financial Institution, Property, Others.'],
+    ['Line of Business must be one of: Manufacture, Trading, Financial Institution, Property, Individual, Others.'],
     ['Estimated Asset Value is in IDR. You can leave it blank if unknown.'],
   ];
 

@@ -1,7 +1,7 @@
 export type DealType = 'New Business' | 'Renewal' | 'Cross Sell' | 'Upsell' | 'Existing Client Update';
 export type DealStage = 'Leads' | 'Data Collection' | 'Quote' | 'Nego' | 'Bind / Closed Won' | 'Policy On Progress' | 'Lost';
-export type LineOfBusiness = 'Manufacture' | 'Trading' | 'Financial Institution' | 'Property' | 'Others' | string;
-export type CompanyClass = 'SME' | 'Large Enterprise';
+export type LineOfBusiness = 'Manufacture' | 'Trading' | 'Financial Institution' | 'Property' | 'Individual' | 'Others' | string;
+export type CompanyClass = 'SME' | 'Large Enterprise' | 'Individual';
 export type CompanyClassMode = 'auto' | 'manual';
 
 export type Currency = 'IDR' | 'USD' | 'EUR' | 'SGD' | 'JPY' | 'AUD' | 'CNY';

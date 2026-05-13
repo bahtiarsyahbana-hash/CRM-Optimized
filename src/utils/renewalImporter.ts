@@ -51,7 +51,7 @@ const VALID_DEAL_TYPES: DealType[] = [
   'New Business', 'Renewal', 'Cross Sell', 'Upsell', 'Existing Client Update',
 ];
 const VALID_LOB: LineOfBusiness[] = [
-  'Manufacture', 'Trading', 'Financial Institution', 'Property', 'Others',
+  'Manufacture', 'Trading', 'Financial Institution', 'Property', 'Individual', 'Others',
 ];
 
 const LOB_SYNONYMS: Record<string, LineOfBusiness> = {
@@ -59,6 +59,7 @@ const LOB_SYNONYMS: Record<string, LineOfBusiness> = {
   trading: 'Trading', trade: 'Trading',
   'financial institution': 'Financial Institution', financial: 'Financial Institution', finance: 'Financial Institution', bank: 'Financial Institution',
   property: 'Property', 'real estate': 'Property',
+  individual: 'Individual', personal: 'Individual',
   others: 'Others', other: 'Others',
 };
 

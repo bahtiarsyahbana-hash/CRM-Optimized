@@ -44,7 +44,8 @@ export const ClientsView = () => {
   const counts = useMemo(() => {
     const sme = classifiedClients.filter(c => c.classification.effectiveClass === 'SME').length;
     const large = classifiedClients.filter(c => c.classification.effectiveClass === 'Large Enterprise').length;
-    return { all: classifiedClients.length, sme, large };
+    const individual = classifiedClients.filter(c => c.classification.effectiveClass === 'Individual').length;
+    return { all: classifiedClients.length, sme, large, individual };
   }, [classifiedClients]);
 
   const handleEdit = (client: Client) => {
@@ -110,6 +111,7 @@ export const ClientsView = () => {
             <ClassFilterPill label={`All (${counts.all})`} active={classFilter === 'all'} onClick={() => setClassFilter('all')} />
             <ClassFilterPill label={`SME (${counts.sme})`} active={classFilter === 'SME'} onClick={() => setClassFilter('SME')} />
             <ClassFilterPill label={`Large Ent. (${counts.large})`} active={classFilter === 'Large Enterprise'} onClick={() => setClassFilter('Large Enterprise')} />
+            <ClassFilterPill label={`Individual (${counts.individual})`} active={classFilter === 'Individual'} onClick={() => setClassFilter('Individual')} />
           </div>
         </div>
         
@@ -238,18 +240,20 @@ const ClassFilterPill: React.FC<{ label: string; active: boolean; onClick: () =>
 );
 
 const ClassBadge: React.FC<{ cls: CompanyClass; isManual: boolean; title?: string }> = ({ cls, isManual, title }) => {
-  const isLarge = cls === 'Large Enterprise';
+  const styles =
+    cls === 'Large Enterprise' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' :
+    cls === 'Individual'       ? 'bg-teal-50 text-teal-700 border-teal-200' :
+                                 'bg-slate-100 text-slate-700 border-slate-200';
+  const label =
+    cls === 'Large Enterprise' ? 'Large Ent.' :
+    cls === 'Individual'       ? 'Individual' :
+                                 'SME';
   return (
     <span
       title={title}
-      className={cn(
-        "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border",
-        isLarge
-          ? "bg-indigo-50 text-indigo-700 border-indigo-200"
-          : "bg-slate-100 text-slate-700 border-slate-200"
-      )}
+      className={cn("inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border", styles)}
     >
-      {isLarge ? 'Large Ent.' : 'SME'}
+      {label}
       {isManual && <span className="text-[9px] font-bold uppercase opacity-70">·M</span>}
     </span>
   );

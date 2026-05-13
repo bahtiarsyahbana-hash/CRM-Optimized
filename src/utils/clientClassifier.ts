@@ -32,6 +32,14 @@ export function classifyClient(client: Client, allDeals: Deal[]): ClientClassifi
   const reasons: string[] = [];
   let autoClass: CompanyClass = 'SME';
 
+  if (client.lineOfBusiness === 'Individual') {
+    autoClass = 'Individual';
+    reasons.push('Line of Business is Individual — personal asset client');
+    const isManualOverride = client.companyClassMode === 'manual' && !!client.companyClass;
+    const effectiveClass: CompanyClass = isManualOverride ? client.companyClass! : autoClass;
+    return { effectiveClass, autoClass, autoReasons: reasons, isManualOverride };
+  }
+
   if (highestPremium >= LARGE_ENTERPRISE_PREMIUM_THRESHOLD) {
     autoClass = 'Large Enterprise';
     reasons.push(`Highest single deal premium IDR ${highestPremium.toLocaleString()} ≥ IDR ${LARGE_ENTERPRISE_PREMIUM_THRESHOLD.toLocaleString()}`);

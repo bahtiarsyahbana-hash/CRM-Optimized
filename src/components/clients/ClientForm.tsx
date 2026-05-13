@@ -143,6 +143,7 @@ export const ClientForm: React.FC<ClientFormProps> = ({ client, onClose }) => {
                     <option value="Trading">Trading</option>
                     <option value="Financial Institution">Financial Institution</option>
                     <option value="Property">Property</option>
+                    <option value="Individual">Individual</option>
                     <option value="Others">Others</option>
                   </select>
                 </div>
@@ -168,6 +169,7 @@ export const ClientForm: React.FC<ClientFormProps> = ({ client, onClose }) => {
                     <option value="__auto__">Auto: {livePreview.autoClass}</option>
                     <option value="SME">Manual: SME</option>
                     <option value="Large Enterprise">Manual: Large Enterprise</option>
+                    <option value="Individual">Manual: Individual</option>
                   </select>
                   <div className={cn(
                     "mt-1.5 flex items-start gap-1.5 text-[11px]",
