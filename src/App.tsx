@@ -32,9 +32,11 @@ function Dashboard() {
     <div className="flex flex-col h-screen w-full bg-slate-50 text-slate-800 font-sans overflow-hidden">
       {/* Header */}
       <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0 z-30 relative">
-        <div className="flex items-center gap-2 font-bold text-slate-900 text-lg tracking-tight">
-          <div className="w-8 h-8 bg-blue-600 rounded-md flex items-center justify-center text-white">R</div>
-          RiskFlow Enterprise
+        <div className="flex items-center gap-2.5">
+          <img src="https://i.ibb.co/tPpYK6wp/B-logo.png" alt="BCI" className="w-8 h-8 rounded-full object-cover shrink-0" />
+          <span className="font-bold text-slate-900 text-lg tracking-tight leading-none">
+            IRIS <span className="font-normal text-slate-400 text-[15px]">by BCI</span>
+          </span>
         </div>
         <GlobalSearch onNavigate={(view) => setCurrentView(view as ViewState)} />
         <div className="flex items-center gap-2.5 text-sm font-medium text-slate-700">
