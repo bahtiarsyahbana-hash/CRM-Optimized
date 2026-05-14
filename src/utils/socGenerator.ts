@@ -4,241 +4,293 @@ import { format } from 'date-fns';
 
 export const generateSOC = (deal: Deal, client?: Client) => {
   const doc = new jsPDF();
-  const companyName = client ? client.companyName : 'Unknown Client';
   const soc = deal.socDetails;
 
+  // Shorthand colour helpers
+  const fill   = (r: number, g: number, b: number) => doc.setFillColor(r, g, b);
+  const stroke = (r: number, g: number, b: number) => doc.setDrawColor(r, g, b);
+  const ink    = (r: number, g: number, b: number) => doc.setTextColor(r, g, b);
+
+  // Layout
+  const lm = 15;   // left margin (mm)
+  const rm = 195;  // right edge
+  const pw = 180;  // usable page width
+
+  // ─── Shared header/footer ─────────────────────────────────────────────────
+  const drawHeader = (title: string, subtitle: string) => {
+    // Accent bar
+    fill(37, 99, 235);
+    doc.rect(0, 0, 210, 2.5, 'F');
+
+    // Company block — right
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    ink(30, 41, 59);
+    doc.text('IRIS BY BCI', rm, 11, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    ink(100, 116, 139);
+    doc.setFontSize(7);
+    doc.text('One Pacific Place, 15th Floor, CEO Suite 1501', rm, 16, { align: 'right' });
+    doc.text('Jl. Jend. Sudirman Kav 52-53, Jakarta 12190, Indonesia', rm, 20, { align: 'right' });
+    doc.text('T: (021) 2550 2428', rm, 24, { align: 'right' });
+
+    // Title — left
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    ink(15, 23, 42);
+    doc.text(title, lm, 18);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    ink(100, 116, 139);
+    doc.text(subtitle, lm, 25);
+
+    // Accent rule
+    stroke(37, 99, 235);
+    doc.setLineWidth(0.4);
+    doc.line(lm, 29, rm, 29);
+  };
+
+  const drawFooter = () => {
+    stroke(226, 232, 240);
+    doc.setLineWidth(0.3);
+    doc.line(lm, 275, rm, 275);
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'normal');
+    ink(150, 160, 175);
+    doc.text('IRIS by BCI — Confidential Document', lm, 281);
+    doc.text(`Generated ${format(new Date(), 'dd MMM yyyy')}`, rm, 281, { align: 'right' });
+  };
+
+  // ─── ADVANCED SOC MODE ────────────────────────────────────────────────────
   if (soc) {
-    // Advanced SOC Mode
-    doc.setFontSize(24);
-    doc.setFont("helvetica", "bold");
-    doc.text('SUMMARY OF COVER', 14, 25);
-    
-    // Company Address (Right aligned)
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "normal");
-    doc.text('One Pacific Place, 15th floor, CEO Suite 1501', 196, 15, { align: 'right' });
-    doc.text('Jl. Jend. Sudirman kav 52-53, Jakarta 12190, Indonesia', 196, 20, { align: 'right' });
-    doc.text('(021) 2550 2428', 196, 25, { align: 'right' });
+    drawHeader(
+      'SUMMARY OF COVER',
+      soc.templateType.toUpperCase() + ' INSURANCE',
+    );
 
-    // Blue separator line
-    doc.setDrawColor(41, 128, 185); // Blue
-    doc.setLineWidth(1);
-    doc.line(14, 32, 196, 32);
+    // ── INFO STRIP ──────────────────────────────────────────────────────────
+    const stripY = 33;
+    const stripH = 19;
+    const cellWidths = [52, 28, 36, 22, 42];
+    const cellDefs = [
+      { label: 'ATTENTION TO',     value: soc.attentionTo || client?.companyName || '—' },
+      { label: 'DATE',             value: soc.socDate || format(new Date(), 'dd-MMM-yyyy') },
+      { label: 'SOC NUMBER',       value: soc.socNumber || deal.coverNoteNumber || `SOC-${new Date().getFullYear()}` },
+      { label: 'CODE',             value: soc.templateType === 'Motor Vehicle' ? 'MV/PT' : 'GN/PT' },
+      { label: 'AMOUNT DUE (IDR)', value: soc.totalPremium.toLocaleString(undefined, { minimumFractionDigits: 2 }) },
+    ];
 
-    // Upper section boxes (Light blue)
-    doc.setFillColor(214, 230, 245); // light blue
-    doc.rect(14, 36, 50, 16, 'F'); // Attention To
-    doc.rect(65, 36, 25, 16, 'F'); // Date
-    doc.rect(91, 36, 30, 16, 'F'); // SOC Number
-    doc.rect(122, 36, 20, 16, 'F'); // Code
-    doc.rect(143, 36, 53, 16, 'F'); // Amount Due
+    fill(248, 250, 252);
+    stroke(226, 232, 240);
+    doc.setLineWidth(0.2);
+    doc.rect(lm, stripY, pw, stripH, 'FD');
 
-    doc.setFontSize(9);
-    doc.setTextColor(0, 0, 0);
+    let cx = lm;
+    cellDefs.forEach((cell, i) => {
+      const cw = cellWidths[i];
+      if (i > 0) {
+        stroke(226, 232, 240);
+        doc.setLineWidth(0.2);
+        doc.line(cx, stripY + 1.5, cx, stripY + stripH - 1.5);
+      }
+      doc.setFontSize(6.5);
+      doc.setFont('helvetica', 'normal');
+      ink(100, 116, 139);
+      doc.text(cell.label, cx + 3, stripY + 7);
 
-    doc.text('Attention to:', 16, 41);
-    doc.text(soc.attentionTo || client?.companyName || '-', 16, 48);
-
-    doc.text('Date:', 67, 41);
-    const todayStr = soc.socDate || format(new Date(), 'dd-MMM-yyyy');
-    doc.setFont("helvetica", "bold");
-    doc.text(todayStr, 67, 48);
-    doc.setFont("helvetica", "normal");
-
-    doc.text('SOC Number:', 93, 41);
-    doc.setFont("helvetica", "bold");
-    doc.text(soc.socNumber || deal.coverNoteNumber || `SOC-${new Date().getFullYear()}`, 93, 48);
-    doc.setFont("helvetica", "normal");
-
-    doc.text('Code:', 124, 41);
-    doc.setFont("helvetica", "bold");
-    doc.text(soc.templateType === 'Motor Vehicle' ? 'MV/PT' : 'GN/PT', 124, 48);
-    doc.setFont("helvetica", "normal");
-
-    doc.text('Amount Due:', 145, 41);
-    doc.setFontSize(12);
-    doc.setFont("helvetica", "bold");
-    doc.text(soc.totalPremium.toLocaleString(undefined, { minimumFractionDigits: 2 }), 193, 49, { align: 'right' });
-    doc.setFont("helvetica", "normal");
-
-    // Clear and reset sizes
-    let infoYPos = 65;
-    const labelX = 14;
-    const colonX = 60;
-    const valueX = 64;
-    const rowHeight = 7;
-
-    const addInfoRow = (label: string, value: string) => {
-        doc.text(label, labelX, infoYPos);
-        doc.text(':', colonX, infoYPos);
-        // split value if long
-        const splitText = doc.splitTextToSize(value, 130);
-        doc.text(splitText, valueX, infoYPos);
-        infoYPos += splitText.length * rowHeight;
-    };
-
-    doc.setFontSize(10);
-    addInfoRow('Insured Name', client?.companyName || '-');
-    addInfoRow('Address', client?.companyAddress || '-');
-    infoYPos += 3;
-
-    addInfoRow('Type Of Insurance', deal.typeOfInsurance || '-');
-    addInfoRow('Insured Object', deal.riskLocation || client?.companyAddress || '-');
-
-    const pStart = deal.periodStart ? format(new Date(deal.periodStart), 'dd-MMM-yyyy') : 'TBA';
-    const pEnd = deal.periodEnd ? format(new Date(deal.periodEnd), 'dd-MMM-yyyy') : 'TBA';
-    addInfoRow('Period Of Insurance', `${pStart}   -   ${pEnd}`);
-    infoYPos += 3;
-
-    addInfoRow('Sum Insured', `${deal.currency} ${deal.sumInsured?.toLocaleString() || '0.00'}`);
-    addInfoRow('Deductible', soc.deductible || '-');
-
-    infoYPos += 3;
-    doc.text('Existing Policy (Optional)', labelX, infoYPos);
-    doc.text(':', colonX, infoYPos);
-    doc.text(deal.coverNoteNumber || 'NEW', valueX, infoYPos);
-
-    doc.setFont("helvetica", "bold");
-    doc.text('Security :', 140, infoYPos);
-    doc.setFont("helvetica", "normal");
-    doc.text(deal.insuranceCompany || 'TBA', 160, infoYPos);
-
-    infoYPos += 12;
-
-    // Table Header
-    doc.setDrawColor(0, 0, 0);
-    doc.setFillColor(0, 0, 0); // Black background
-    doc.rect(14, infoYPos, 182, 8, 'F');
-    
-    doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.text('NO.', 16, infoYPos + 5);
-    doc.text('COVERAGE', 30, infoYPos + 5);
-    doc.text('RATE', 110, infoYPos + 5);
-    doc.text('AMOUNT', 160, infoYPos + 5);
-    
-    doc.setTextColor(0, 0, 0);
-    let yPos = infoYPos + 15;
-    doc.setFont("helvetica", "normal");
-
-    soc.coverages.forEach((cov, i) => {
-      doc.text((i + 1).toString(), 18, yPos);
-      doc.text(cov.name, 30, yPos);
-      doc.text(cov.rateType === 'percentage' ? `${cov.rate}%` : cov.rate, 110, yPos);
-      doc.text(cov.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }), 190, yPos, { align: 'right' });
-      yPos += 8;
+      const isAmt = i === 4;
+      doc.setFontSize(isAmt ? 8 : 9);
+      doc.setFont('helvetica', 'bold');
+      if (isAmt) ink(37, 99, 235); else ink(15, 23, 42);
+      doc.text(doc.splitTextToSize(cell.value, cw - 5)[0], cx + 3, stripY + 15);
+      cx += cw;
     });
 
-    yPos += 2;
-    doc.setDrawColor(0, 0, 0);
-    doc.line(14, yPos, 196, yPos);
-    yPos += 8;
+    // ── POLICY INFO ROWS ────────────────────────────────────────────────────
+    let y = stripY + stripH + 9;
+    const labelW = 58;
 
-    const rightAlignX = 194;
-    const totalLabelX = 130;
-    doc.text('Sub Total:', totalLabelX, yPos);
-    doc.text(soc.subTotal.toLocaleString(undefined, { minimumFractionDigits: 2 }), rightAlignX, yPos, { align: 'right' });
-    yPos += 8;
+    const drawInfoRow = (label: string, value: string, valueBold = false) => {
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      ink(100, 116, 139);
+      doc.text(label, lm, y);
+      doc.setFont('helvetica', valueBold ? 'bold' : 'normal');
+      ink(15, 23, 42);
+      const lines = doc.splitTextToSize(value, pw - labelW - 2);
+      doc.text(lines, lm + labelW, y);
+      y += Math.max(1, lines.length) * 6.5;
+    };
+
+    const drawDivider = () => {
+      y += 2;
+      stroke(226, 232, 240);
+      doc.setLineWidth(0.2);
+      doc.line(lm, y, rm, y);
+      y += 5;
+    };
+
+    drawInfoRow('Insured Name', client?.companyName || '—', true);
+    if (deal.qq && deal.qq.length > 0) {
+      drawInfoRow('QQ (Atas Nama)', deal.qq.join(' QQ '));
+    }
+    drawInfoRow('Address', client?.companyAddress || '—');
+    drawDivider();
+    drawInfoRow('Type of Insurance', deal.typeOfInsurance || '—');
+    drawInfoRow('Insured Object', deal.riskLocation || client?.companyAddress || '—');
+    const pStart = deal.periodStart ? format(new Date(deal.periodStart), 'dd MMM yyyy') : 'TBA';
+    const pEnd   = deal.periodEnd   ? format(new Date(deal.periodEnd),   'dd MMM yyyy') : 'TBA';
+    drawInfoRow('Period of Insurance', `${pStart}  –  ${pEnd}`);
+    drawDivider();
+    drawInfoRow('Sum Insured', `${deal.currency} ${deal.sumInsured?.toLocaleString() || '0.00'}`);
+    drawInfoRow('Deductible', soc.deductible || '—');
+    drawInfoRow('Existing Policy No.', deal.coverNoteNumber || 'NEW');
+    drawInfoRow('Security (Insurer)', deal.insuranceCompany || 'TBA');
+    y += 7;
+
+    // ── COVERAGE TABLE ──────────────────────────────────────────────────────
+    const tHdrH = 9;
+    const tRowH = 8;
+    const colNo   = lm;
+    const colName = lm + 12;
+    const colRate = lm + 122;
+    const colAmt  = rm;
+
+    // Header row — dark navy
+    fill(15, 23, 42);
+    doc.rect(lm, y, pw, tHdrH, 'F');
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    ink(255, 255, 255);
+    doc.text('NO.', colNo + 5, y + 6, { align: 'right' });
+    doc.text('DESCRIPTION OF COVERAGE', colName, y + 6);
+    doc.text('RATE', colRate, y + 6);
+    doc.text('AMOUNT (IDR)', colAmt, y + 6, { align: 'right' });
+    y += tHdrH;
+
+    // Thin accent underline
+    fill(37, 99, 235);
+    doc.rect(lm, y, pw, 0.8, 'F');
+    y += 0.8;
+
+    // Data rows — alternating backgrounds
+    soc.coverages.forEach((cov, i) => {
+      const isAlt = i % 2 !== 0;
+      if (isAlt) {
+        fill(248, 250, 252);
+        doc.rect(lm, y, pw, tRowH, 'F');
+      }
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
+      ink(30, 41, 59);
+      doc.text(String(i + 1), colNo + 5, y + 5.5, { align: 'right' });
+      doc.text(doc.splitTextToSize(cov.name, colRate - colName - 4)[0], colName, y + 5.5);
+      doc.text(cov.rateType === 'percentage' ? `${cov.rate}%` : cov.rate, colRate, y + 5.5);
+      doc.text(
+        cov.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        colAmt, y + 5.5, { align: 'right' },
+      );
+      y += tRowH;
+    });
+
+    // Table bottom rule
+    stroke(226, 232, 240);
+    doc.setLineWidth(0.3);
+    doc.line(lm, y, rm, y);
+    y += 7;
+
+    // ── TOTALS ──────────────────────────────────────────────────────────────
+    const totLblX = rm - 78;
+    const totValX = rm;
+
+    const drawTotal = (label: string, value: string, highlight = false) => {
+      if (highlight) {
+        fill(15, 23, 42);
+        doc.rect(lm, y - 6.5, pw, 10.5, 'F');
+        ink(255, 255, 255);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+      } else {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        ink(100, 116, 139);
+      }
+      doc.text(label, totLblX, y);
+      if (!highlight) ink(30, 41, 59);
+      doc.text(value, totValX, y, { align: 'right' });
+      y += highlight ? 11 : 7.5;
+    };
+
+    drawTotal('Sub Total', soc.subTotal.toLocaleString(undefined, { minimumFractionDigits: 2 }));
 
     if (soc.discountPercent > 0) {
-      const discountAmount = soc.subTotal * (soc.discountPercent / 100);
-      doc.text(`Discount (${soc.discountPercent}%):`, totalLabelX, yPos);
-      doc.text(`-${discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, rightAlignX, yPos, { align: 'right' });
-      yPos += 8;
+      const disc = soc.subTotal * (soc.discountPercent / 100);
+      drawTotal(
+        `Discount (${soc.discountPercent}%)`,
+        `– ${disc.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+      );
     }
 
-    doc.text('Admin Cost:', totalLabelX, yPos);
-    doc.text(soc.adminFee.toLocaleString(undefined, { minimumFractionDigits: 2 }), rightAlignX, yPos, { align: 'right' });
-    yPos += 8;
+    drawTotal('Admin Fee', soc.adminFee.toLocaleString(undefined, { minimumFractionDigits: 2 }));
 
     if (soc.policyFee && soc.policyFee > 0) {
-      doc.text('Policy Fee:', totalLabelX, yPos);
-      doc.text(soc.policyFee.toLocaleString(undefined, { minimumFractionDigits: 2 }), rightAlignX, yPos, { align: 'right' });
-      yPos += 8;
+      drawTotal('Policy Fee', soc.policyFee.toLocaleString(undefined, { minimumFractionDigits: 2 }));
     }
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text('Total Premium:', totalLabelX, yPos);
-    doc.text(soc.totalPremium.toLocaleString(undefined, { minimumFractionDigits: 2 }), rightAlignX, yPos, { align: 'right' });
+    // Separator before grand total
+    stroke(226, 232, 240);
+    doc.setLineWidth(0.3);
+    doc.line(totLblX, y - 2, rm, y - 2);
+    y += 4;
+
+    drawTotal(
+      'TOTAL PREMIUM (IDR)',
+      soc.totalPremium.toLocaleString(undefined, { minimumFractionDigits: 2 }),
+      true,
+    );
 
   } else {
-    // Basic Mode (Fallback)
-    const today = format(new Date(), 'MMMM do, yyyy');
-    const lineOfBusiness = client ? client.lineOfBusiness : 'Unknown LOB';
-    
-    // Header
-    doc.setFontSize(22);
-    doc.setTextColor(33, 33, 33);
-    doc.text('STATEMENT OF COVERAGE (SOC)', 105, 20, { align: 'center' });
-    
-    doc.setFontSize(14);
-    doc.setTextColor(100, 100, 100);
-    doc.text(deal.dealType === 'New Business' ? 'NEW POLICY SUMMARY' : 'RENEWAL POLICY SUMMARY', 105, 30, { align: 'center' });
+    // ─── BASIC / FALLBACK MODE ───────────────────────────────────────────────
+    drawHeader(
+      'STATEMENT OF COVERAGE',
+      deal.dealType === 'New Business' ? 'NEW POLICY SUMMARY' : 'RENEWAL POLICY SUMMARY',
+    );
 
-    // Draw a line
-    doc.setDrawColor(200, 200, 200);
-    doc.line(20, 35, 190, 35);
+    const companyName = client?.companyName || 'Unknown Client';
+    const rows: [string, string][] = [
+      ['Date Issued',      format(new Date(), 'dd MMM yyyy')],
+      ['Client',           companyName],
+      ['Line of Business', client?.lineOfBusiness || '—'],
+      ['Type of Insurance',deal.typeOfInsurance || '—'],
+      ['Sum Insured',      `${deal.currency} ${deal.sumInsured?.toLocaleString() || '0'}`],
+      ['Premium',          deal.premiumAmount ? `${deal.currency} ${deal.premiumAmount.toLocaleString()}` : 'TBD'],
+      ['Policy Stage',     deal.statusStage],
+      ['Deal Type',        deal.dealType],
+    ];
 
-    // Client Details
-    doc.setFontSize(12);
-    doc.setTextColor(50, 50, 50);
-    doc.text(`Date Issued: ${today}`, 20, 45);
-    doc.text(`Company Name: ${companyName}`, 20, 55);
-    doc.text(`Line of Business: ${lineOfBusiness}`, 20, 65);
-    if (deal.typeOfInsurance) {
-      doc.text(`Insurance Type: ${deal.typeOfInsurance}`, 20, 75);
-    }
-    
-    // Deal/Policy Details
-    doc.setFontSize(16);
-    doc.setTextColor(0, 0, 0);
-    doc.text('Policy Information', 20, 95);
-    doc.setLineWidth(0.5);
-    doc.line(20, 98, 80, 98);
-
-    doc.setFontSize(12);
-    doc.setTextColor(50, 50, 50);
-    let yPos = 110;
-    doc.text(`Sum Insured: ${deal.currency} ${deal.sumInsured?.toLocaleString() || '0'}`, 20, yPos);
-    
-    if (deal.sumInsuredBreakdown && deal.sumInsuredBreakdown.length > 0) {
+    let yPos = 38;
+    rows.forEach(([label, value]) => {
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      ink(100, 116, 139);
+      doc.text(label, lm, yPos);
+      doc.setFont('helvetica', 'bold');
+      ink(15, 23, 42);
+      doc.text(value, lm + 58, yPos);
+      stroke(226, 232, 240);
+      doc.setLineWidth(0.2);
+      doc.line(lm, yPos + 3, rm, yPos + 3);
       yPos += 10;
-      doc.setFontSize(10);
-      deal.sumInsuredBreakdown.forEach((b) => {
-        doc.text(`- ${b.assetName}: ${deal.currency} ${b.amount.toLocaleString()}`, 25, yPos);
-        yPos += 8;
-      });
-      doc.setFontSize(12);
-    } else {
-      yPos += 10;
-    }
-    
-    doc.text(`Premium: ${deal.premiumAmount ? `${deal.currency} ${deal.premiumAmount.toLocaleString()}` : 'TBD'}`, 20, yPos);
+    });
+
     yPos += 10;
-    doc.text(`Pipeline Stage: ${deal.statusStage}`, 20, yPos);
-    yPos += 10;
-    doc.text(`Policy Type: ${deal.dealType}`, 20, yPos);
-    
-    // Terms & Conditions stub
-    doc.setFontSize(14);
-    doc.setTextColor(0, 0, 0);
-    doc.text('Terms & Conditions', 20, yPos + 20);
-    
-    doc.setFontSize(10);
-    doc.setTextColor(80, 80, 80);
-    const termsText = deal.dealType === 'New Business' 
-      ? "This Statement of Coverage outlines the terms and conditions for your new insurance policy. Please review carefully. This document is a summary and does not constitute the full binding policy documentation."
-      : "This Statement of Coverage outlines the terms and conditions for your policy renewal. Existing terms carry over unless specified otherwise. Please review any amendments carefully.";
-    
-    const splitText = doc.splitTextToSize(termsText, 170);
-    doc.text(splitText, 20, yPos + 30);
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'normal');
+    ink(150, 160, 175);
+    const note = 'This document is a summary and does not constitute the full binding policy. Please review the complete policy terms carefully.';
+    doc.text(doc.splitTextToSize(note, pw), lm, yPos);
   }
 
-  // Footer
-  doc.setFontSize(10);
-  doc.setTextColor(150, 150, 150);
-  doc.text('Generated by Risk Flow CRM', 105, 280, { align: 'center' });
-
+  drawFooter();
   return doc;
 };
