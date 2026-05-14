@@ -80,29 +80,44 @@ export const generateSOC = (deal: Deal, client?: Client) => {
       { label: 'AMOUNT DUE (IDR)', value: soc.totalPremium.toLocaleString(undefined, { minimumFractionDigits: 2 }) },
     ];
 
+    // Base strip — grey background for first 4 cells
     fill(248, 250, 252);
     stroke(226, 232, 240);
     doc.setLineWidth(0.2);
     doc.rect(lm, stripY, pw, stripH, 'FD');
 
+    // Accent fill for last cell (Amount Due)
+    const lastCellX = lm + cellWidths.slice(0, 4).reduce((a, b) => a + b, 0);
+    fill(37, 99, 235);
+    doc.rect(lastCellX + 0.1, stripY + 0.1, cellWidths[4] - 0.2, stripH - 0.2, 'F');
+
     let cx = lm;
     cellDefs.forEach((cell, i) => {
       const cw = cellWidths[i];
-      if (i > 0) {
+      const isAmt = i === 4;
+
+      if (i > 0 && !isAmt) {
         stroke(226, 232, 240);
         doc.setLineWidth(0.2);
         doc.line(cx, stripY + 1.5, cx, stripY + stripH - 1.5);
       }
+
       doc.setFontSize(6.5);
       doc.setFont('helvetica', 'normal');
-      ink(100, 116, 139);
+      ink(isAmt ? 191 : 100, isAmt ? 219 : 116, isAmt ? 254 : 139);
       doc.text(cell.label, cx + 3, stripY + 7);
 
-      const isAmt = i === 4;
-      doc.setFontSize(isAmt ? 8 : 9);
+      doc.setFontSize(isAmt ? 9 : 9);
       doc.setFont('helvetica', 'bold');
-      if (isAmt) ink(37, 99, 235); else ink(15, 23, 42);
-      doc.text(doc.splitTextToSize(cell.value, cw - 5)[0], cx + 3, stripY + 15);
+      ink(isAmt ? 255 : 15, isAmt ? 255 : 23, isAmt ? 255 : 42);
+      if (isAmt) {
+        doc.text(
+          doc.splitTextToSize(cell.value, cw - 6)[0],
+          cx + cw - 3, stripY + 15, { align: 'right' },
+        );
+      } else {
+        doc.text(doc.splitTextToSize(cell.value, cw - 5)[0], cx + 3, stripY + 15);
+      }
       cx += cw;
     });
 
@@ -149,12 +164,12 @@ export const generateSOC = (deal: Deal, client?: Client) => {
     y += 7;
 
     // ── COVERAGE TABLE ──────────────────────────────────────────────────────
-    const tHdrH = 9;
-    const tRowH = 8;
+    const tHdrH   = 9;
+    const tRowH   = 8;
     const colNo   = lm;
     const colName = lm + 12;
-    const colRate = lm + 122;
-    const colAmt  = rm;
+    const colRateR = rm - 35;   // rate column — right-aligned here
+    const colAmt  = rm;         // amount — right-aligned
 
     // Header row — dark navy
     fill(15, 23, 42);
@@ -164,7 +179,13 @@ export const generateSOC = (deal: Deal, client?: Client) => {
     ink(255, 255, 255);
     doc.text('NO.', colNo + 5, y + 6, { align: 'right' });
     doc.text('DESCRIPTION OF COVERAGE', colName, y + 6);
-    doc.text('RATE', colRate, y + 6);
+    doc.text('RATE', colRateR, y + 6, { align: 'right' });
+    // Thin divider between Rate and Amount in header
+    stroke(255, 255, 255);
+    doc.setLineWidth(0.1);
+    doc.line(colRateR + 2, y + 1.5, colRateR + 2, y + tHdrH - 1.5);
+    doc.setFont('helvetica', 'bold');
+    ink(255, 255, 255);
     doc.text('AMOUNT (IDR)', colAmt, y + 6, { align: 'right' });
     y += tHdrH;
 
@@ -184,8 +205,11 @@ export const generateSOC = (deal: Deal, client?: Client) => {
       doc.setFont('helvetica', 'normal');
       ink(30, 41, 59);
       doc.text(String(i + 1), colNo + 5, y + 5.5, { align: 'right' });
-      doc.text(doc.splitTextToSize(cov.name, colRate - colName - 4)[0], colName, y + 5.5);
-      doc.text(cov.rateType === 'percentage' ? `${cov.rate}%` : cov.rate, colRate, y + 5.5);
+      doc.text(doc.splitTextToSize(cov.name, colRateR - colName - 6)[0], colName, y + 5.5);
+      ink(71, 85, 105);
+      doc.text(cov.rateType === 'percentage' ? `${cov.rate}%` : cov.rate, colRateR, y + 5.5, { align: 'right' });
+      ink(30, 41, 59);
+      doc.setFont('helvetica', 'bold');
       doc.text(
         cov.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }),
         colAmt, y + 5.5, { align: 'right' },
@@ -200,54 +224,77 @@ export const generateSOC = (deal: Deal, client?: Client) => {
     y += 7;
 
     // ── TOTALS ──────────────────────────────────────────────────────────────
-    const totLblX = rm - 78;
-    const totValX = rm;
+    const panelX  = rm - 92;
+    const panelW  = 92;
+    const totLblX = panelX + 5;
+    const totValX = rm - 4;
+    const subRowH = 7.5;
+    const grandH  = 12;
 
-    const drawTotal = (label: string, value: string, highlight = false) => {
-      if (highlight) {
-        fill(15, 23, 42);
-        doc.rect(lm, y - 6.5, pw, 10.5, 'F');
-        ink(255, 255, 255);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(9.5);
-      } else {
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(8.5);
-        ink(100, 116, 139);
-      }
-      doc.text(label, totLblX, y);
-      if (!highlight) ink(30, 41, 59);
-      doc.text(value, totValX, y, { align: 'right' });
-      y += highlight ? 11 : 7.5;
-    };
-
-    drawTotal('Sub Total', soc.subTotal.toLocaleString(undefined, { minimumFractionDigits: 2 }));
-
+    // Collect sub-rows
+    type TotRow = { label: string; value: string; negative?: boolean };
+    const subRows: TotRow[] = [
+      { label: 'Sub Total', value: soc.subTotal.toLocaleString(undefined, { minimumFractionDigits: 2 }) },
+    ];
     if (soc.discountPercent > 0) {
       const disc = soc.subTotal * (soc.discountPercent / 100);
-      drawTotal(
-        `Discount (${soc.discountPercent}%)`,
-        `– ${disc.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-      );
+      subRows.push({
+        label: `Discount (${soc.discountPercent}%)`,
+        value: disc.toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        negative: true,
+      });
     }
-
-    drawTotal('Admin Fee', soc.adminFee.toLocaleString(undefined, { minimumFractionDigits: 2 }));
-
+    subRows.push({ label: 'Admin Fee', value: soc.adminFee.toLocaleString(undefined, { minimumFractionDigits: 2 }) });
     if (soc.policyFee && soc.policyFee > 0) {
-      drawTotal('Policy Fee', soc.policyFee.toLocaleString(undefined, { minimumFractionDigits: 2 }));
+      subRows.push({ label: 'Policy Fee', value: soc.policyFee.toLocaleString(undefined, { minimumFractionDigits: 2 }) });
     }
 
-    // Separator before grand total
-    stroke(226, 232, 240);
-    doc.setLineWidth(0.3);
-    doc.line(totLblX, y - 2, rm, y - 2);
-    y += 4;
+    const panelH = subRows.length * subRowH + 2 + grandH;
 
-    drawTotal(
-      'TOTAL PREMIUM (IDR)',
+    // Panel container — subtle box on the right
+    fill(248, 250, 252);
+    stroke(226, 232, 240);
+    doc.setLineWidth(0.25);
+    doc.rect(panelX, y, panelW, panelH, 'FD');
+
+    let ty = y;
+    subRows.forEach(row => {
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      ink(100, 116, 139);
+      doc.text(row.label, totLblX, ty + 5);
+      if (row.negative) {
+        ink(220, 38, 38);
+        doc.text(`– ${row.value}`, totValX, ty + 5, { align: 'right' });
+      } else {
+        doc.setFont('helvetica', 'bold');
+        ink(15, 23, 42);
+        doc.text(row.value, totValX, ty + 5, { align: 'right' });
+      }
+      ty += subRowH;
+    });
+
+    // Divider inside panel before grand total
+    ty += 1;
+    stroke(203, 213, 225);
+    doc.setLineWidth(0.4);
+    doc.line(panelX + 4, ty, rm - 4, ty);
+    ty += 1;
+
+    // Grand total — blue accent row
+    fill(37, 99, 235);
+    doc.rect(panelX, ty, panelW, grandH, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    ink(191, 219, 254);
+    doc.text('TOTAL PREMIUM (IDR)', totLblX, ty + 4.5);
+    doc.setFontSize(10.5);
+    ink(255, 255, 255);
+    doc.text(
       soc.totalPremium.toLocaleString(undefined, { minimumFractionDigits: 2 }),
-      true,
+      totValX, ty + 9.5, { align: 'right' },
     );
+    y = ty + grandH + 8;
 
   } else {
     // ─── BASIC / FALLBACK MODE ───────────────────────────────────────────────
