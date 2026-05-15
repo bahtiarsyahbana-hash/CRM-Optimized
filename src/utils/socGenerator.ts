@@ -22,6 +22,14 @@ export const generateSOC = (deal: Deal, client?: Client) => {
     fill(37, 99, 235);
     doc.rect(0, 0, 210, 2.5, 'F');
 
+    // Address — right
+    doc.setFont('helvetica', 'normal');
+    ink(150, 160, 175);
+    doc.setFontSize(6.5);
+    doc.text('One Pacific Place, 15th Floor, CEO Suite 1501', rm, 13, { align: 'right' });
+    doc.text('Jl. Jend. Sudirman Kav 52-53, Jakarta 12190, Indonesia', rm, 17.5, { align: 'right' });
+    doc.text('T: (021) 2550 2428', rm, 22, { align: 'right' });
+
     // Title — left
     doc.setFontSize(20);
     doc.setFont('helvetica', 'bold');
@@ -176,7 +184,8 @@ export const generateSOC = (deal: Deal, client?: Client) => {
     doc.rect(lm, y, pw, 0.8, 'F');
     y += 0.8;
 
-    // Data rows — alternating backgrounds
+    // Data rows — alternating backgrounds + row borders
+    const tableBodyY = y;
     soc.coverages.forEach((cov, i) => {
       const isAlt = i % 2 !== 0;
       if (isAlt) {
@@ -186,7 +195,7 @@ export const generateSOC = (deal: Deal, client?: Client) => {
       doc.setFontSize(8.5);
       doc.setFont('helvetica', 'normal');
       ink(30, 41, 59);
-      doc.text(String(i + 1), colNo + 5, y + 5.5, { align: 'right' });
+      doc.text(String(i + 1), colNo + 7, y + 5.5, { align: 'right' });
       doc.text(doc.splitTextToSize(cov.name, colRateR - colName - 6)[0], colName, y + 5.5);
       ink(71, 85, 105);
       doc.text(cov.rateType === 'percentage' ? `${cov.rate}%` : cov.rate, colRateR, y + 5.5, { align: 'right' });
@@ -196,8 +205,16 @@ export const generateSOC = (deal: Deal, client?: Client) => {
         cov.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }),
         colAmt, y + 5.5, { align: 'right' },
       );
+      // Subtle row bottom border
+      stroke(226, 232, 240);
+      doc.setLineWidth(0.15);
+      doc.line(lm + 2, y + tRowH, rm, y + tRowH);
       y += tRowH;
     });
+
+    // Blue left accent strip spanning the full table body
+    fill(37, 99, 235);
+    doc.rect(lm, tableBodyY, 1.5, y - tableBodyY, 'F');
 
     // Table bottom rule
     stroke(226, 232, 240);
