@@ -22,18 +22,6 @@ export const generateSOC = (deal: Deal, client?: Client) => {
     fill(37, 99, 235);
     doc.rect(0, 0, 210, 2.5, 'F');
 
-    // Company block — right
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    ink(30, 41, 59);
-    doc.text('IRIS BY BCI', rm, 11, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    ink(100, 116, 139);
-    doc.setFontSize(7);
-    doc.text('One Pacific Place, 15th Floor, CEO Suite 1501', rm, 16, { align: 'right' });
-    doc.text('Jl. Jend. Sudirman Kav 52-53, Jakarta 12190, Indonesia', rm, 20, { align: 'right' });
-    doc.text('T: (021) 2550 2428', rm, 24, { align: 'right' });
-
     // Title — left
     doc.setFontSize(20);
     doc.setFont('helvetica', 'bold');
@@ -180,12 +168,6 @@ export const generateSOC = (deal: Deal, client?: Client) => {
     doc.text('NO.', colNo + 5, y + 6, { align: 'right' });
     doc.text('DESCRIPTION OF COVERAGE', colName, y + 6);
     doc.text('RATE', colRateR, y + 6, { align: 'right' });
-    // Thin divider between Rate and Amount in header
-    stroke(255, 255, 255);
-    doc.setLineWidth(0.1);
-    doc.line(colRateR + 2, y + 1.5, colRateR + 2, y + tHdrH - 1.5);
-    doc.setFont('helvetica', 'bold');
-    ink(255, 255, 255);
     doc.text('AMOUNT (IDR)', colAmt, y + 6, { align: 'right' });
     y += tHdrH;
 
