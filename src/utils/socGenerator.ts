@@ -160,12 +160,18 @@ export const generateSOC = (deal: Deal, client?: Client) => {
     y += 7;
 
     // ── COVERAGE TABLE ──────────────────────────────────────────────────────
-    const tHdrH   = 9;
-    const tRowH   = 8;
-    const colNo   = lm;
-    const colName = lm + 12;
-    const colRateR = rm - 35;   // rate column — right-aligned here
-    const colAmt  = rm;         // amount — right-aligned
+    // Column layout (all mm from left edge of page):
+    //   NO.    : 15 → 28  (13mm, compact)
+    //   DESC   : 30 → 113 (83mm, majority of width)
+    //   RATE   : 113 → 151 (38mm, right-aligned at 151)
+    //   AMOUNT : 151 → 195 (44mm, right-aligned at 195)
+    const tHdrH  = 9;
+    const tRowH  = 8.5;
+    const colNoR  = lm + 13;   // NO. right-align point
+    const colName = lm + 15;   // Description left edge
+    const colRateL = rm - 82;  // Rate column left edge
+    const colRateR = rm - 44;  // Rate right-align point
+    const colAmt  = rm;        // Amount right-align point
 
     // Header row — dark navy
     fill(15, 23, 42);
@@ -173,7 +179,7 @@ export const generateSOC = (deal: Deal, client?: Client) => {
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
     ink(255, 255, 255);
-    doc.text('NO.', colNo + 5, y + 6, { align: 'right' });
+    doc.text('NO.', colNoR, y + 6, { align: 'right' });
     doc.text('DESCRIPTION OF COVERAGE', colName, y + 6);
     doc.text('RATE', colRateR, y + 6, { align: 'right' });
     doc.text('AMOUNT (IDR)', colAmt, y + 6, { align: 'right' });
@@ -184,8 +190,7 @@ export const generateSOC = (deal: Deal, client?: Client) => {
     doc.rect(lm, y, pw, 0.8, 'F');
     y += 0.8;
 
-    // Data rows — alternating backgrounds + row borders
-    const tableBodyY = y;
+    // Data rows — alternating backgrounds + subtle row borders
     soc.coverages.forEach((cov, i) => {
       const isAlt = i % 2 !== 0;
       if (isAlt) {
@@ -194,31 +199,27 @@ export const generateSOC = (deal: Deal, client?: Client) => {
       }
       doc.setFontSize(8.5);
       doc.setFont('helvetica', 'normal');
+      ink(100, 116, 139);
+      doc.text(String(i + 1), colNoR, y + 6, { align: 'right' });
       ink(30, 41, 59);
-      doc.text(String(i + 1), colNo + 7, y + 5.5, { align: 'right' });
-      doc.text(doc.splitTextToSize(cov.name, colRateR - colName - 6)[0], colName, y + 5.5);
+      doc.text(doc.splitTextToSize(cov.name, colRateL - colName - 3)[0], colName, y + 6);
       ink(71, 85, 105);
-      doc.text(cov.rateType === 'percentage' ? `${cov.rate}%` : cov.rate, colRateR, y + 5.5, { align: 'right' });
-      ink(30, 41, 59);
+      doc.text(cov.rateType === 'percentage' ? `${cov.rate}%` : cov.rate, colRateR, y + 6, { align: 'right' });
       doc.setFont('helvetica', 'bold');
+      ink(15, 23, 42);
       doc.text(
         cov.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }),
-        colAmt, y + 5.5, { align: 'right' },
+        colAmt, y + 6, { align: 'right' },
       );
-      // Subtle row bottom border
       stroke(226, 232, 240);
       doc.setLineWidth(0.15);
-      doc.line(lm + 2, y + tRowH, rm, y + tRowH);
+      doc.line(lm, y + tRowH, rm, y + tRowH);
       y += tRowH;
     });
 
-    // Blue left accent strip spanning the full table body
-    fill(37, 99, 235);
-    doc.rect(lm, tableBodyY, 1.5, y - tableBodyY, 'F');
-
     // Table bottom rule
-    stroke(226, 232, 240);
-    doc.setLineWidth(0.3);
+    stroke(203, 213, 225);
+    doc.setLineWidth(0.4);
     doc.line(lm, y, rm, y);
     y += 7;
 
