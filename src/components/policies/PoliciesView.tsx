@@ -10,10 +10,8 @@ import { PolicyPreviewModal } from './PolicyPreviewModal';
 export const PoliciesView = () => {
   const { deals, clients, updateDeal, addClaim, addEndorsement } = useData();
   const [searchTerm, setSearchTerm] = useState('');
-  const [periodStartFrom, setPeriodStartFrom] = useState('');
-  const [periodStartTo, setPeriodStartTo] = useState('');
-  const [periodEndFrom, setPeriodEndFrom] = useState('');
-  const [periodEndTo, setPeriodEndTo] = useState('');
+  // Single-month filter against periodStart — "show policies whose period starts in this month"
+  const [periodStartMonth, setPeriodStartMonth] = useState(''); // format: YYYY-MM
 
   // Show policies that are in progress or already completed/bound
   const policies = deals.filter(d => {
@@ -28,32 +26,21 @@ export const PoliciesView = () => {
       clients.find(c => c.id === d.clientId)?.companyName.toLowerCase().includes(searchTerm.toLowerCase());
     if (!matchesSearch) return false;
 
-    const startTime = d.periodStart ? new Date(d.periodStart).getTime() : null;
-    const endTime = d.periodEnd ? new Date(d.periodEnd).getTime() : null;
-
-    if (periodStartFrom) {
-      if (startTime === null || startTime < new Date(periodStartFrom).getTime()) return false;
-    }
-    if (periodStartTo) {
-      if (startTime === null || startTime > new Date(periodStartTo).getTime()) return false;
-    }
-    if (periodEndFrom) {
-      if (endTime === null || endTime < new Date(periodEndFrom).getTime()) return false;
-    }
-    if (periodEndTo) {
-      if (endTime === null || endTime > new Date(periodEndTo).getTime()) return false;
+    if (periodStartMonth) {
+      if (!d.periodStart) return false;
+      const [yStr, mStr] = periodStartMonth.split('-');
+      const y = parseInt(yStr, 10);
+      const m = parseInt(mStr, 10) - 1; // JS month index
+      const monthStart = new Date(y, m, 1).getTime();
+      const monthEnd = new Date(y, m + 1, 1).getTime(); // exclusive
+      const startTime = new Date(d.periodStart).getTime();
+      if (startTime < monthStart || startTime >= monthEnd) return false;
     }
 
     return true;
   });
 
-  const hasPeriodFilter = periodStartFrom || periodStartTo || periodEndFrom || periodEndTo;
-  const clearPeriodFilters = () => {
-    setPeriodStartFrom('');
-    setPeriodStartTo('');
-    setPeriodEndFrom('');
-    setPeriodEndTo('');
-  };
+  const clearPeriodFilters = () => setPeriodStartMonth('');
 
   const [selectedPolicy, setSelectedPolicy] = useState<Deal | null>(null);
 
@@ -87,9 +74,37 @@ export const PoliciesView = () => {
       <div className="mb-6 flex items-start justify-between shrink-0 gap-4">
         <div>
           <h1 className="text-xl font-bold text-slate-900 mb-1">Active Policies</h1>
-          <p className="text-[13px] text-slate-500">Manage issued policies, cover notes, and request aftersales services.</p>
+          <p className="text-[13px] text-slate-500">
+            Manage issued policies, cover notes, and request aftersales services.
+            {periodStartMonth && (
+              <span className="ml-2 inline-flex items-center gap-1 text-[12px] font-medium text-blue-700 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded">
+                {policies.length} {policies.length === 1 ? 'policy' : 'policies'} starting in{' '}
+                {new Date(periodStartMonth + '-01').toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+              </span>
+            )}
+          </p>
         </div>
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-md shadow-sm px-3 py-2">
+            <label className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap">
+              Period Start (Month)
+            </label>
+            <input
+              type="month"
+              value={periodStartMonth}
+              onChange={(e) => setPeriodStartMonth(e.target.value)}
+              className="px-2 py-1 border border-slate-200 rounded text-[12px] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            />
+            {periodStartMonth && (
+              <button
+                onClick={clearPeriodFilters}
+                className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-800 px-1.5 py-1 rounded hover:bg-slate-100 transition-colors"
+                title="Clear filter"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
@@ -99,54 +114,6 @@ export const PoliciesView = () => {
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-9 pr-4 py-2 w-64 bg-white border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors shadow-sm"
             />
-          </div>
-          <div className="flex items-end gap-3 bg-white border border-slate-200 rounded-md shadow-sm px-3 py-2">
-            <div className="flex flex-col">
-              <label className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">Period Start</label>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="date"
-                  value={periodStartFrom}
-                  onChange={(e) => setPeriodStartFrom(e.target.value)}
-                  className="px-2 py-1 border border-slate-200 rounded text-[12px] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                />
-                <span className="text-[11px] text-slate-400">to</span>
-                <input
-                  type="date"
-                  value={periodStartTo}
-                  onChange={(e) => setPeriodStartTo(e.target.value)}
-                  className="px-2 py-1 border border-slate-200 rounded text-[12px] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-            <div className="flex flex-col">
-              <label className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">Period End</label>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="date"
-                  value={periodEndFrom}
-                  onChange={(e) => setPeriodEndFrom(e.target.value)}
-                  className="px-2 py-1 border border-slate-200 rounded text-[12px] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                />
-                <span className="text-[11px] text-slate-400">to</span>
-                <input
-                  type="date"
-                  value={periodEndTo}
-                  onChange={(e) => setPeriodEndTo(e.target.value)}
-                  className="px-2 py-1 border border-slate-200 rounded text-[12px] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-            {hasPeriodFilter && (
-              <button
-                onClick={clearPeriodFilters}
-                className="self-end flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-800 px-2 py-1 rounded hover:bg-slate-100 transition-colors"
-                title="Clear period filters"
-              >
-                <X className="w-3 h-3" />
-                Clear
-              </button>
-            )}
           </div>
         </div>
       </div>
