@@ -10,13 +10,50 @@ import { PolicyPreviewModal } from './PolicyPreviewModal';
 export const PoliciesView = () => {
   const { deals, clients, updateDeal, addClaim, addEndorsement } = useData();
   const [searchTerm, setSearchTerm] = useState('');
-  
+  const [periodStartFrom, setPeriodStartFrom] = useState('');
+  const [periodStartTo, setPeriodStartTo] = useState('');
+  const [periodEndFrom, setPeriodEndFrom] = useState('');
+  const [periodEndTo, setPeriodEndTo] = useState('');
+
   // Show policies that are in progress or already completed/bound
-  const policies = deals.filter(d => 
-    (d.statusStage === 'Policy On Progress' || d.statusStage === 'Bind / Closed Won' || d.dealType === 'Renewal') &&
-    (d.typeOfInsurance.toLowerCase().includes(searchTerm.toLowerCase()) || 
-     clients.find(c => c.id === d.clientId)?.companyName.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const policies = deals.filter(d => {
+    const matchesStatus =
+      d.statusStage === 'Policy On Progress' ||
+      d.statusStage === 'Bind / Closed Won' ||
+      d.dealType === 'Renewal';
+    if (!matchesStatus) return false;
+
+    const matchesSearch =
+      d.typeOfInsurance.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      clients.find(c => c.id === d.clientId)?.companyName.toLowerCase().includes(searchTerm.toLowerCase());
+    if (!matchesSearch) return false;
+
+    const startTime = d.periodStart ? new Date(d.periodStart).getTime() : null;
+    const endTime = d.periodEnd ? new Date(d.periodEnd).getTime() : null;
+
+    if (periodStartFrom) {
+      if (startTime === null || startTime < new Date(periodStartFrom).getTime()) return false;
+    }
+    if (periodStartTo) {
+      if (startTime === null || startTime > new Date(periodStartTo).getTime()) return false;
+    }
+    if (periodEndFrom) {
+      if (endTime === null || endTime < new Date(periodEndFrom).getTime()) return false;
+    }
+    if (periodEndTo) {
+      if (endTime === null || endTime > new Date(periodEndTo).getTime()) return false;
+    }
+
+    return true;
+  });
+
+  const hasPeriodFilter = periodStartFrom || periodStartTo || periodEndFrom || periodEndTo;
+  const clearPeriodFilters = () => {
+    setPeriodStartFrom('');
+    setPeriodStartTo('');
+    setPeriodEndFrom('');
+    setPeriodEndTo('');
+  };
 
   const [selectedPolicy, setSelectedPolicy] = useState<Deal | null>(null);
 
@@ -47,20 +84,70 @@ export const PoliciesView = () => {
 
   return (
     <div className="h-full flex flex-col p-8 bg-slate-50 relative">
-      <div className="mb-6 flex items-center justify-between shrink-0">
+      <div className="mb-6 flex items-start justify-between shrink-0 gap-4">
         <div>
           <h1 className="text-xl font-bold text-slate-900 mb-1">Active Policies</h1>
           <p className="text-[13px] text-slate-500">Manage issued policies, cover notes, and request aftersales services.</p>
         </div>
-        <div className="relative">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input 
-            type="text" 
-            placeholder="Search policies..." 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-9 pr-4 py-2 w-64 bg-white border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors shadow-sm"
-          />
+        <div className="flex flex-col items-end gap-2">
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search policies..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-9 pr-4 py-2 w-64 bg-white border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors shadow-sm"
+            />
+          </div>
+          <div className="flex items-end gap-3 bg-white border border-slate-200 rounded-md shadow-sm px-3 py-2">
+            <div className="flex flex-col">
+              <label className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">Period Start</label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="date"
+                  value={periodStartFrom}
+                  onChange={(e) => setPeriodStartFrom(e.target.value)}
+                  className="px-2 py-1 border border-slate-200 rounded text-[12px] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+                <span className="text-[11px] text-slate-400">to</span>
+                <input
+                  type="date"
+                  value={periodStartTo}
+                  onChange={(e) => setPeriodStartTo(e.target.value)}
+                  className="px-2 py-1 border border-slate-200 rounded text-[12px] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <div className="flex flex-col">
+              <label className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">Period End</label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="date"
+                  value={periodEndFrom}
+                  onChange={(e) => setPeriodEndFrom(e.target.value)}
+                  className="px-2 py-1 border border-slate-200 rounded text-[12px] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+                <span className="text-[11px] text-slate-400">to</span>
+                <input
+                  type="date"
+                  value={periodEndTo}
+                  onChange={(e) => setPeriodEndTo(e.target.value)}
+                  className="px-2 py-1 border border-slate-200 rounded text-[12px] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            {hasPeriodFilter && (
+              <button
+                onClick={clearPeriodFilters}
+                className="self-end flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-800 px-2 py-1 rounded hover:bg-slate-100 transition-colors"
+                title="Clear period filters"
+              >
+                <X className="w-3 h-3" />
+                Clear
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
