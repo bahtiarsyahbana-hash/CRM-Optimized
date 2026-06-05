@@ -172,6 +172,7 @@ export const DealDetailForm = ({
     deal?.premiumAmount != null ? formatNumber(deal.premiumAmount.toString()) : ''
   );
   const [riskLocation, setRiskLocation] = useState(deal?.riskLocation || '');
+  const [riskDetail, setRiskDetail] = useState(deal?.riskDetail || '');
   const [periodStart, setPeriodStart] = useState(
     deal?.periodStart ? new Date(deal.periodStart).toISOString().split('T')[0] : ''
   );
@@ -375,6 +376,7 @@ export const DealDetailForm = ({
     periodEnd: periodEnd ? new Date(periodEnd).toISOString() : undefined,
     statusStage,
     riskLocation: riskLocation || undefined,
+    riskDetail: riskDetail || undefined,
     picName: picName || undefined,
     picEmail: picEmail || undefined,
     picPhone: picPhone || undefined,
@@ -525,6 +527,7 @@ export const DealDetailForm = ({
                 premiumAmount, setPremiumAmount,
                 premiumLocked: premiumFromSoc,
                 riskLocation, setRiskLocation,
+                riskDetail, setRiskDetail,
                 periodStart, setPeriodStart,
                 periodEnd, setPeriodEnd,
                 picName, setPicName,
@@ -588,7 +591,7 @@ export const DealDetailForm = ({
               client={selectedClient}
               data={{
                 clientAddress, dealType, typeOfInsurance, productType, sumInsured,
-                currency, premiumType, premiumAmount, riskLocation, periodStart, periodEnd,
+                currency, premiumType, premiumAmount, riskLocation, riskDetail, periodStart, periodEnd,
                 picName, picEmail, picPhone, insuranceCompany, statusStage, documents,
                 baseRate, discountPercent, efCommissionPercent, taxPercent,
                 agentName, agentCashback, agentCashbackType,
@@ -757,6 +760,7 @@ interface StepCoverageProps {
   /** When true, the premium amount field is locked because the SOC calculator drives it. */
   premiumLocked?: boolean;
   riskLocation: string;                               setRiskLocation: (v: string) => void;
+  riskDetail: string;                                 setRiskDetail: (v: string) => void;
   periodStart: string;                                setPeriodStart: (v: string) => void;
   periodEnd: string;                                  setPeriodEnd: (v: string) => void;
   picName: string;                                    setPicName: (v: string) => void;
@@ -855,10 +859,17 @@ const StepCoverage: React.FC<StepCoverageProps> = (p) => {
           </select>
         </Field>
 
-        <Field label="Risk Location" className="md:col-span-2">
+        <Field label="Risk Location" hint="Optional — where the insured risk is located." className="md:col-span-2">
           <textarea
             value={p.riskLocation} onChange={e => p.setRiskLocation(e.target.value)} rows={2}
-            className={cn(inputClass, 'resize-none')} placeholder="Where the insured risk is located..."
+            className={cn(inputClass, 'resize-none')} placeholder="e.g. Jl. Industri No. 5, Cikarang, Bekasi"
+          />
+        </Field>
+
+        <Field label="Risk Detail" hint="Optional — underwriting notes, exposure description, asset specifics, etc." className="md:col-span-2">
+          <textarea
+            value={p.riskDetail} onChange={e => p.setRiskDetail(e.target.value)} rows={3}
+            className={cn(inputClass, 'resize-none')} placeholder="Underwriting notes, exposure notes, asset details..."
           />
         </Field>
 
@@ -1306,6 +1317,7 @@ interface PreviewData {
   premiumType: string;
   premiumAmount: string;
   riskLocation: string;
+  riskDetail: string;
   periodStart: string;
   periodEnd: string;
   picName: string;
@@ -1364,6 +1376,7 @@ const StepPreview: React.FC<{
           <PreviewRow label="Premium" value={data.premiumAmount ? `${data.currency} ${data.premiumAmount} (${data.premiumType})` : '—'} />
           <PreviewRow label="Period" value={data.periodStart && data.periodEnd ? `${data.periodStart} → ${data.periodEnd}` : '—'} />
           <PreviewRow label="Risk Location" value={data.riskLocation || '—'} multiline />
+          <PreviewRow label="Risk Detail" value={data.riskDetail || '—'} multiline />
         </div>
         <div className="mt-3 pt-3 border-t border-slate-100">
           <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">PIC</div>
