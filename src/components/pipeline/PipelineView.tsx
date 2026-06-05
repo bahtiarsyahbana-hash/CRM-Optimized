@@ -26,6 +26,11 @@ export const PipelineView = () => {
 
   const confirmBind = () => {
     if (!bindCandidate) return;
+    if (bindCandidate.approvalStatus !== 'Approved') {
+      toast.error('This deal must be approved before it can be bound.');
+      setBindCandidate(null);
+      return;
+    }
     if (!bindCandidate.insuranceCompany) {
       toast.error('Insurance Company is required before binding. Edit the deal first.');
       setEditDeal(bindCandidate);
@@ -256,7 +261,9 @@ export const PipelineView = () => {
                     </td>
                     <td className="px-6 py-3 text-right">
                       <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {deal.statusStage !== 'Policy On Progress' && deal.statusStage !== 'Lost' && (
+                        {deal.statusStage !== 'Policy On Progress'
+                          && deal.statusStage !== 'Lost'
+                          && deal.approvalStatus === 'Approved' && (
                           <button
                             onClick={(e) => { e.stopPropagation(); setBindCandidate(deal); }}
                             className="text-[11px] font-semibold text-white bg-emerald-600 hover:bg-emerald-700 px-2 py-1 rounded transition-colors flex items-center gap-1 shadow-sm"
