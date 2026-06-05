@@ -1,28 +1,31 @@
 import React, { useState } from 'react';
 import { useData } from '../../context/DataContext';
-import { Deal, DealStage, DealType } from '../../types';
-import { Plus, Search, Building2, MoreHorizontal, CheckCircle2, Edit2, Upload } from 'lucide-react';
+import { Deal, DealType } from '../../types';
+import { Plus, Search, Building2, Edit2, Upload, GitBranch } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { generateSOC } from '../../utils/socGenerator';
-import toast from 'react-hot-toast';
 import { DealDetailForm } from '../clients/DealDetailForm';
-import { SOCManagerModal } from './SOCManagerModal';import { RenewalImportModal } from './RenewalImportModal';
+import { SOCManagerModal } from './SOCManagerModal';
+import { RenewalImportModal } from './RenewalImportModal';
+import { DealJourneyView } from './DealJourneyView';
+import { ApprovalActionMenu, ApprovalStatusBadge } from './ApprovalActionMenu';
 
 export const PipelineView = () => {
-  const { deals, clients, updateDealStage } = useData();
+  const { deals, clients } = useData();
   const [activeTab, setActiveTab] = useState<DealType>('New Business');
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<string>('All');
-  
+
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [editDeal, setEditDeal] = useState<Deal | null>(null);
   const [socDeal, setSocDeal] = useState<Deal | null>(null);
-  const [activeDealForStage, setActiveDealForStage] = useState<Deal | null>(null);
+  const [journeyDeal, setJourneyDeal] = useState<Deal | null>(null);
 
-  const STAGES = activeTab === 'New Business' 
-    ? ['Leads', 'Data Collection', 'Quote', 'Nego', 'Bind / Closed Won', 'Policy On Progress', 'Lost'] as DealStage[]
-    : ['Policy On Progress', 'Data Collection', 'Quote', 'Nego', 'Bind / Closed Won', 'Lost'] as DealStage[];
+  // If we have a journey deal selected, render the dedicated journey page.
+  if (journeyDeal) {
+    const freshDeal = deals.find(d => d.id === journeyDeal.id) || journeyDeal;
+    return <DealJourneyView deal={freshDeal} onBack={() => setJourneyDeal(null)} />;
+  }
 
   const filteredDeals = deals.filter(d => {
     // Determine which tab the deal belongs to
@@ -52,26 +55,6 @@ export const PipelineView = () => {
     setSocDeal(deal);
   };
 
-  const openStageManager = (e: React.MouseEvent, deal: Deal) => {
-    e.stopPropagation();
-    setActiveDealForStage(deal);
-  };
-
-  const handleStageChange = (newStage: DealStage) => {
-    if (activeDealForStage) {
-      if (newStage === 'Policy On Progress' && !activeDealForStage.insuranceCompany) {
-        toast.error('Insurance Company is required before moving to Policy On Progress.');
-        setEditDeal(activeDealForStage);
-        setActiveDealForStage(null);
-        return;
-      }
-
-      updateDealStage(activeDealForStage.id, newStage);
-      setActiveDealForStage(d => d ? { ...d, statusStage: newStage } : null);
-      toast.success('Stage updated!');
-    }
-  };
-  
   const getStageColor = (stage: string) => {
     const colors: Record<string, string> = {
       'Leads': 'bg-slate-100 text-slate-700',
@@ -177,6 +160,7 @@ export const PipelineView = () => {
                 <th className="px-6 py-3 font-semibold text-slate-600">Sum Insured</th>
                 <th className="px-6 py-3 font-semibold text-slate-600">Premium</th>
                 <th className="px-6 py-3 font-semibold text-slate-600">Stage</th>
+                <th className="px-6 py-3 font-semibold text-slate-600">Approval</th>
                 <th className="px-6 py-3 font-semibold text-slate-600">Last Updated</th>
                 <th className="px-6 py-3 font-semibold text-slate-600 text-right">Action</th>
               </tr>
@@ -224,22 +208,33 @@ export const PipelineView = () => {
                       <div className="font-mono text-slate-600 font-semibold">{deal.premiumAmount ? `${deal.currency} ${deal.premiumAmount.toLocaleString()}` : '-'}</div>
                     </td>
                     <td className="px-6 py-3">
-                      <span className={cn("px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide", getStageColor(deal.statusStage))}>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setJourneyDeal(deal); }}
+                        className={cn(
+                          "px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide hover:ring-2 hover:ring-blue-300 transition-shadow cursor-pointer",
+                          getStageColor(deal.statusStage)
+                        )}
+                        title="Open journey & log a transition"
+                      >
                         {deal.statusStage}
-                      </span>
+                      </button>
+                    </td>
+                    <td className="px-6 py-3">
+                      <ApprovalStatusBadge status={deal.approvalStatus} />
                     </td>
                     <td className="px-6 py-3 text-slate-500 text-xs text-mono">
                       {new Date(deal.updatedAt).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-3 text-right">
                       <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button 
+                        <ApprovalActionMenu deal={deal} />
+                        <button
                           onClick={(e) => handleGenerateSOC(e, deal)}
                           className="text-[11px] font-semibold text-slate-500 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded transition-colors"
                         >
                           Generate SOC
                         </button>
-                        <button 
+                        <button
                           onClick={(e) => {
                             e.stopPropagation();
                             setEditDeal(deal);
@@ -249,12 +244,12 @@ export const PipelineView = () => {
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button 
-                          onClick={(e) => openStageManager(e, deal)}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setJourneyDeal(deal); }}
                           className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                          title="Update Stage"
+                          title="Open Journey"
                         >
-                          <MoreHorizontal className="w-5 h-5" />
+                          <GitBranch className="w-4 h-4" />
                         </button>
                       </div>
                     </td>
@@ -273,65 +268,6 @@ export const PipelineView = () => {
           )}
         </div>
       </div>
-
-      {activeDealForStage && (
-        <div className="absolute top-0 right-0 bottom-0 w-[400px] bg-white border-l border-slate-200 shadow-2xl z-20 flex flex-col animate-in slide-in-from-right duration-300">
-          <div className="p-6 border-b border-slate-100 flex justify-between items-start bg-slate-50">
-            <div>
-              <h3 className="text-lg font-bold text-slate-900 leading-tight">Manage Workflow Stage</h3>
-              <p className="text-[13px] text-slate-500 mt-1">Update pipeline phase.</p>
-            </div>
-            <button onClick={() => setActiveDealForStage(null)} className="text-slate-400 hover:text-slate-600 p-1">
-              &times;
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-6">
-            <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-4">Click to move to new stage</h4>
-            <div className="flex flex-col gap-2 relative">
-              <div className="absolute left-[15px] top-4 bottom-4 w-px bg-slate-200 z-0"></div>
-              
-              {STAGES.map((stage, idx) => {
-                const isActive = activeDealForStage.statusStage === stage;
-                const isPast = STAGES.indexOf(activeDealForStage.statusStage) > idx;
-
-                return (
-                  <button
-                    key={stage}
-                    onClick={() => handleStageChange(stage)}
-                    className={cn(
-                      "relative z-10 flex items-center gap-4 p-3 rounded-lg border text-left transition-all",
-                      isActive 
-                        ? "bg-blue-50 border-blue-200 shadow-[0_1px_2px_rgba(0,0,0,0.05)]" 
-                        : isPast 
-                          ? "bg-white border-slate-200 hover:border-slate-300 opacity-70" 
-                          : "bg-white border-slate-200 hover:border-slate-300"
-                    )}
-                  >
-                    <div className={cn(
-                      "w-8 h-8 rounded-full flex items-center justify-center shrink-0 border-2 bg-white",
-                      isActive ? "border-blue-500 text-blue-600" : isPast ? "border-emerald-500 text-emerald-500" : "border-slate-200 text-slate-300"
-                    )}>
-                      {isPast ? <CheckCircle2 className="w-4 h-4" /> : <div className={cn("w-2 h-2 rounded-full", isActive ? "bg-blue-600" : "bg-slate-300")}></div>}
-                    </div>
-                    <div>
-                      <div className={cn("font-semibold text-[13px]", isActive ? "text-blue-900" : "text-slate-700")}>{stage}</div>
-                      {isActive && <div className="text-[11px] text-blue-600 font-medium">Current Stage</div>}
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-          <div className="p-6 bg-slate-50 border-t border-slate-100">
-            <button 
-              onClick={() => setActiveDealForStage(null)}
-              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold text-[13px] py-2.5 rounded-md transition-colors"
-            >
-              Done
-            </button>
-          </div>
-        </div>
-      )}
 
       {isAddOpen && (
         <DealDetailForm onClose={() => setIsAddOpen(false)} />

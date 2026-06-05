@@ -1,5 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Deal, Claim, ClaimStatus, Endorsement, HistoryLog, DealStage, DealType, Client } from '../types';
+import {
+  Deal, Claim, ClaimStatus, Endorsement, HistoryLog, DealStage, DealType, Client,
+  DealApprovalAction, DealApprovalLogEntry, DealApprovalStatus, DealStageLogEntry,
+} from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
@@ -33,7 +36,8 @@ interface DataContextType {
   addDeal: (deal: Omit<Deal, 'id' | 'createdAt' | 'updatedAt'>) => void;
   updateDeal: (id: string, deal: Partial<Deal>) => void;
   deleteDeal: (id: string) => void;
-  updateDealStage: (id: string, newStage: DealStage) => void;
+  updateDealStage: (id: string, newStage: DealStage, notes?: string) => void;
+  recordApproval: (id: string, action: DealApprovalAction, notes?: string) => void;
   addClaim: (claim: Omit<Claim, 'id' | 'dateRegistered'>) => void;
   updateClaimStatus: (id: string, status: Claim['status']) => void;
   addEndorsement: (endorsement: Omit<Endorsement, 'id' | 'dateRequested'>) => void;
@@ -124,12 +128,27 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
-  const updateDealStage = (id: string, newStage: DealStage) => {
+  const updateDealStage = (id: string, newStage: DealStage, notes?: string) => {
     const deal = deals.find(d => d.id === id);
     if (!deal || deal.statusStage === newStage) return;
 
     const oldStage = deal.statusStage;
-    const updatedDeal: Deal = { ...deal, statusStage: newStage, updatedAt: new Date().toISOString() };
+    const nowIso = new Date().toISOString();
+
+    // Append to the per-deal stage log so the journey page can render history.
+    const stageLogEntry: DealStageLogEntry = {
+      fromStage: oldStage,
+      toStage: newStage,
+      notes: notes?.trim() || undefined,
+      at: nowIso,
+    };
+
+    const updatedDeal: Deal = {
+      ...deal,
+      statusStage: newStage,
+      stageLog: [...(deal.stageLog || []), stageLogEntry],
+      updatedAt: nowIso,
+    };
 
     // Automatically move to Renewal Client if a New Business reaches Policy On Progress
     if (deal.dealType === 'New Business' && newStage === 'Policy On Progress') {
@@ -138,13 +157,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const newDeals = deals.map(d => d.id === id ? updatedDeal : d);
 
-    // Add history log
+    // Add history log (kept for backwards compatibility with anything that reads it)
     const newLog: HistoryLog = {
       id: uuidv4(),
       dealId: id,
       fromStage: oldStage,
       toStage: newStage,
-      date: new Date().toISOString()
+      date: nowIso,
     };
     const newLogs = [...historyLogs, newLog];
 
@@ -152,6 +171,33 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setHistoryLogs(newLogs);
     saveAll('deals', newDeals);
     saveAll('historyLogs', newLogs);
+  };
+
+  const recordApproval = (id: string, action: DealApprovalAction, notes?: string) => {
+    const deal = deals.find(d => d.id === id);
+    if (!deal) return;
+
+    const nextStatus: DealApprovalStatus =
+      action === 'Approve' ? 'Approved'
+        : action === 'Reject' ? 'Rejected'
+          : 'Needs Adjustment';
+
+    const entry: DealApprovalLogEntry = {
+      action,
+      notes: notes?.trim() || undefined,
+      at: new Date().toISOString(),
+    };
+
+    setDeals(prev => {
+      const newDeals = prev.map(d => d.id === id ? {
+        ...d,
+        approvalStatus: nextStatus,
+        approvalLog: [...(d.approvalLog || []), entry],
+        updatedAt: new Date().toISOString(),
+      } : d);
+      saveAll('deals', newDeals);
+      return newDeals;
+    });
   };
 
   const addClaim = (claimData: Omit<Claim, 'id' | 'dateRegistered'>) => {
@@ -201,7 +247,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <DataContext.Provider value={{
       clients, deals, claims, endorsements, historyLogs,
       addClient, updateClient, deleteClient,
-      addDeal, updateDeal, deleteDeal, updateDealStage,
+      addDeal, updateDeal, deleteDeal, updateDealStage, recordApproval,
       addClaim, updateClaimStatus, addEndorsement, updateEndorsementStatus,
       clearDatabase
     }}>

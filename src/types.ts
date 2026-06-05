@@ -76,7 +76,29 @@ export interface DealCommission {
 export type ProductType = 'General Insurance' | 'Marine Cargo' | 'Custom';
 export const PRODUCT_TYPES: ProductType[] = ['General Insurance', 'Marine Cargo', 'Custom'];
 
-export type DealApprovalStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Rejected';
+export type DealApprovalStatus =
+  | 'Draft'
+  | 'Pending Approval'
+  | 'Approved'
+  | 'Rejected'
+  | 'Needs Adjustment';
+
+export type DealApprovalAction = 'Approve' | 'Reject' | 'Need Adjustment';
+
+export interface DealApprovalLogEntry {
+  action: DealApprovalAction;
+  notes?: string;
+  at: string; // ISO timestamp
+  by?: string;
+}
+
+export interface DealStageLogEntry {
+  fromStage: DealStage;
+  toStage: DealStage;
+  notes?: string;
+  at: string; // ISO timestamp
+  by?: string;
+}
 
 export interface DealDocuments {
   termsCondition?: string;
@@ -119,6 +141,10 @@ export interface Deal {
   documents?: DealDocuments;
   /** Approval workflow status set on the preview step of the wizard. */
   approvalStatus?: DealApprovalStatus;
+  /** Notes attached to the latest approval decision (most recent first). */
+  approvalLog?: DealApprovalLogEntry[];
+  /** Per-deal history of stage transitions with optional notes. */
+  stageLog?: DealStageLogEntry[];
   coverNoteNumber?: string;
   originalPolicyFile?: string;
   /** Additional named parties on the policy (QQ = atas nama). Max 5. */
