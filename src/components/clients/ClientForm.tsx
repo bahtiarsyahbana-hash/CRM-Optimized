@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useData } from '../../context/DataContext';
-import { Client, LineOfBusiness, CompanyClass, CompanyClassMode } from '../../types';
+import { Client, LineOfBusiness, CompanyClass, CompanyClassMode, SourceClient, SOURCE_CLIENT_OPTIONS } from '../../types';
 import { X, Building2, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { classifyClient } from '../../utils/clientClassifier';
@@ -18,9 +18,8 @@ export const ClientForm: React.FC<ClientFormProps> = ({ client, onClose }) => {
     companyName: '',
     lineOfBusiness: 'Manufacture' as LineOfBusiness,
     companyAddress: '',
-    businessOccupation: '',
-    assetDetail: '',
-    estimatedValueAsset: '',
+    sourceClient: '' as '' | SourceClient,
+    estimatedAnnualPremium: '',
     parentGroup: '',
     companyClass: '' as '' | CompanyClass,
     companyClassMode: 'auto' as CompanyClassMode,
@@ -35,9 +34,8 @@ export const ClientForm: React.FC<ClientFormProps> = ({ client, onClose }) => {
         companyName: client.companyName,
         lineOfBusiness: client.lineOfBusiness,
         companyAddress: client.companyAddress || '',
-        businessOccupation: client.businessOccupation,
-        assetDetail: client.assetDetail || '',
-        estimatedValueAsset: client.estimatedValueAsset ? client.estimatedValueAsset.toLocaleString('en-US') : '',
+        sourceClient: (client.sourceClient || '') as '' | SourceClient,
+        estimatedAnnualPremium: client.estimatedAnnualPremium ? client.estimatedAnnualPremium.toLocaleString('en-US') : '',
         parentGroup: client.parentGroup || '',
         companyClass: (client.companyClass || '') as '' | CompanyClass,
         companyClassMode: client.companyClassMode || 'auto',
@@ -54,18 +52,17 @@ export const ClientForm: React.FC<ClientFormProps> = ({ client, onClose }) => {
       id: client?.id || '__preview__',
       companyName: formData.companyName,
       lineOfBusiness: formData.lineOfBusiness,
-      businessOccupation: formData.businessOccupation,
       parentGroup: formData.parentGroup,
       createdAt: client?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     return classifyClient(previewClient, deals);
-  }, [client?.id, formData.parentGroup, deals, formData.companyName, formData.lineOfBusiness, formData.businessOccupation, client?.createdAt]);
+  }, [client?.id, formData.parentGroup, deals, formData.companyName, formData.lineOfBusiness, client?.createdAt]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.companyName || !formData.businessOccupation) {
-      toast.error('Company Name and Business Occupation are required.');
+    if (!formData.companyName) {
+      toast.error('Company Name is required.');
       return;
     }
 
@@ -75,9 +72,14 @@ export const ClientForm: React.FC<ClientFormProps> = ({ client, onClose }) => {
       companyName: formData.companyName,
       lineOfBusiness: formData.lineOfBusiness,
       companyAddress: formData.companyAddress,
-      businessOccupation: formData.businessOccupation,
-      assetDetail: formData.assetDetail,
-      estimatedValueAsset: formData.estimatedValueAsset ? parseFloat(formData.estimatedValueAsset.replace(/,/g, '')) : undefined,
+      // Preserve legacy fields on edit so existing data isn't wiped.
+      businessOccupation: client?.businessOccupation,
+      assetDetail: client?.assetDetail,
+      estimatedValueAsset: client?.estimatedValueAsset,
+      sourceClient: (formData.sourceClient || undefined) as SourceClient | undefined,
+      estimatedAnnualPremium: formData.estimatedAnnualPremium
+        ? parseFloat(formData.estimatedAnnualPremium.replace(/,/g, ''))
+        : undefined,
       parentGroup: formData.parentGroup.trim() || undefined,
       companyClass: isManual ? (formData.companyClass as CompanyClass) : undefined,
       companyClassMode: isManual ? ('manual' as CompanyClassMode) : ('auto' as CompanyClassMode),
@@ -187,26 +189,39 @@ export const ClientForm: React.FC<ClientFormProps> = ({ client, onClose }) => {
                   <label className="block text-[12px] font-semibold text-slate-700 mb-1">Company Address</label>
                   <textarea rows={2} value={formData.companyAddress} onChange={e => setFormData(prev => ({...prev, companyAddress: e.target.value}))} className="w-full px-3 py-2 border border-slate-200 rounded-md focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-[13px] resize-none" placeholder="Full head office address..." />
                 </div>
-                <div className="md:col-span-2">
-                  <label className="block text-[12px] font-semibold text-slate-700 mb-1">Business Occupation *</label>
-                  <textarea rows={2} required value={formData.businessOccupation} onChange={e => setFormData(prev => ({...prev, businessOccupation: e.target.value}))} className="w-full px-3 py-2 border border-slate-200 rounded-md focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-[13px] resize-none" placeholder="e.g. Food manufacturing, textile trading, rural bank..." />
-                </div>
               </div>
             </div>
 
             <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm space-y-4">
-              <h3 className="text-sm font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2">2. Asset Details (Optional)</h3>
-              <div className="grid grid-cols-1 gap-4">
+              <h3 className="text-sm font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2">2. Source & Estimated Premium</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[12px] font-semibold text-slate-700 mb-1">Asset Detail</label>
-                  <textarea rows={3} value={formData.assetDetail} onChange={e => setFormData(prev => ({...prev, assetDetail: e.target.value}))} className="w-full px-3 py-2 border border-slate-200 rounded-md focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-[13px] resize-none" placeholder="Describe key assets (building, machinery, fleet, etc.)..." />
+                  <label className="block text-[12px] font-semibold text-slate-700 mb-1">Source Client</label>
+                  <select
+                    value={formData.sourceClient}
+                    onChange={e => setFormData(prev => ({ ...prev, sourceClient: e.target.value as '' | SourceClient }))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-md focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-[13px] bg-white"
+                  >
+                    <option value="">— Select source —</option>
+                    {SOURCE_CLIENT_OPTIONS.map(opt => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-slate-500">How did this client come in?</p>
                 </div>
                 <div>
-                  <label className="block text-[12px] font-semibold text-slate-700 mb-1">Estimated Value Asset</label>
+                  <label className="block text-[12px] font-semibold text-slate-700 mb-1">Estimated Annual Premium</label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-[13px] font-medium">IDR</span>
-                    <input type="text" value={formData.estimatedValueAsset} onChange={e => handleNumberChange(e, 'estimatedValueAsset')} className="w-full pl-12 pr-4 py-2 border border-slate-200 rounded-md focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-[13px] font-mono" placeholder="0" />
+                    <input
+                      type="text"
+                      value={formData.estimatedAnnualPremium}
+                      onChange={e => handleNumberChange(e, 'estimatedAnnualPremium')}
+                      className="w-full pl-12 pr-4 py-2 border border-slate-200 rounded-md focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-[13px] font-mono"
+                      placeholder="0"
+                    />
                   </div>
+                  <p className="mt-1 text-[11px] text-slate-500">Total expected premium across all policies in a year.</p>
                 </div>
               </div>
             </div>

@@ -28,14 +28,23 @@ export const CLAIM_PROGRESSION: ClaimStatus[] = [
   'Settled',
 ];
 
+export type SourceClient = 'Client Existing' | 'Referral' | 'New Business';
+export const SOURCE_CLIENT_OPTIONS: SourceClient[] = ['Client Existing', 'Referral', 'New Business'];
+
 export interface Client {
   id: string;
   companyName: string;
   lineOfBusiness: LineOfBusiness;
   companyAddress?: string;
-  businessOccupation: string;
+  /** Legacy — no longer captured on the client form, but preserved on records
+   *  that have it (cover-note generator + spreadsheet imports still read it). */
+  businessOccupation?: string;
+  /** Legacy — see businessOccupation. */
   assetDetail?: string;
+  /** Legacy — see businessOccupation. */
   estimatedValueAsset?: number;
+  sourceClient?: SourceClient;
+  estimatedAnnualPremium?: number;
   parentGroup?: string;
   companyClass?: CompanyClass;
   companyClassMode?: CompanyClassMode;

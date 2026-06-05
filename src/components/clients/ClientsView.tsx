@@ -33,7 +33,7 @@ export const ClientsView = () => {
         const matchesSearch =
           (client.companyName || '').toLowerCase().includes(q) ||
           (client.lineOfBusiness || '').toLowerCase().includes(q) ||
-          (client.businessOccupation || '').toLowerCase().includes(q) ||
+          (client.sourceClient || '').toLowerCase().includes(q) ||
           (client.parentGroup || '').toLowerCase().includes(q);
         const matchesClass = classFilter === 'all' || classification.effectiveClass === classFilter;
         return matchesSearch && matchesClass;
@@ -123,7 +123,7 @@ export const ClientsView = () => {
                 <th className="px-6 py-3 font-semibold text-slate-600">Class</th>
                 <th className="px-6 py-3 font-semibold text-slate-600">Parent Group</th>
                 <th className="px-6 py-3 font-semibold text-slate-600">Line of Business</th>
-                <th className="px-6 py-3 font-semibold text-slate-600">Business Occupation</th>
+                <th className="px-6 py-3 font-semibold text-slate-600">Source Client</th>
                 <th className="px-6 py-3 font-semibold text-slate-600 text-center">Deals</th>
                 <th className="px-6 py-3 font-semibold text-slate-600 text-right">Actions</th>
               </tr>
@@ -155,7 +155,18 @@ export const ClientsView = () => {
                       <div className="font-medium text-slate-700">{client.lineOfBusiness}</div>
                     </td>
                     <td className="px-6 py-3">
-                      <div className="text-slate-600 truncate max-w-[200px]" title={client.businessOccupation}>{client.businessOccupation}</div>
+                      {client.sourceClient ? (
+                        <span className={cn(
+                          "px-2 py-0.5 rounded-full text-[11px] font-semibold border",
+                          client.sourceClient === 'Client Existing' && "bg-blue-50 text-blue-700 border-blue-200",
+                          client.sourceClient === 'Referral' && "bg-purple-50 text-purple-700 border-purple-200",
+                          client.sourceClient === 'New Business' && "bg-emerald-50 text-emerald-700 border-emerald-200",
+                        )}>
+                          {client.sourceClient}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 text-[12px] italic">—</span>
+                      )}
                     </td>
                     <td className="px-6 py-3 text-center">
                       <span className={cn(
