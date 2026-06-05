@@ -194,6 +194,7 @@ export const DealDetailForm = ({
       !typeOfInsurance ? 'Type of Insurance is required.' : null,
       !productType ? 'Product Type is required.' : null,
       !premiumType ? 'Premium Type is required.' : null,
+      !insuranceCompany ? 'Insurance Company is required.' : null,
     ].filter(Boolean) as string[],
     status: !statusStage ? ['Status Stage is required.'] : [],
     commission: [
@@ -678,7 +679,7 @@ const StepCoverage: React.FC<StepCoverageProps> = (p) => {
           </select>
         </Field>
 
-        <Field label="Insurance Company">
+        <Field label="Insurance Company" required>
           <select value={p.insuranceCompany} onChange={e => p.setInsuranceCompany(e.target.value)} className={inputClass}>
             <option value="">Select Insurance Company</option>
             {INSURANCE_COMPANIES.map(co => <option key={co} value={co}>{co}</option>)}
