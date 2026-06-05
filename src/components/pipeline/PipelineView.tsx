@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useData } from '../../context/DataContext';
 import { Deal, DealType } from '../../types';
-import { Plus, Search, Building2, Edit2, Upload, GitBranch } from 'lucide-react';
+import { Plus, Search, Building2, Edit2, Upload, GitBranch, Trash2, AlertTriangle, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import toast from 'react-hot-toast';
 import { DealDetailForm } from '../clients/DealDetailForm';
 import { SOCManagerModal } from './SOCManagerModal';
 import { RenewalImportModal } from './RenewalImportModal';
@@ -10,7 +11,7 @@ import { DealJourneyView } from './DealJourneyView';
 import { ApprovalActionMenu, ApprovalStatusBadge } from './ApprovalActionMenu';
 
 export const PipelineView = () => {
-  const { deals, clients } = useData();
+  const { deals, clients, deleteDeal } = useData();
   const [activeTab, setActiveTab] = useState<DealType>('New Business');
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<string>('All');
@@ -20,6 +21,15 @@ export const PipelineView = () => {
   const [editDeal, setEditDeal] = useState<Deal | null>(null);
   const [socDeal, setSocDeal] = useState<Deal | null>(null);
   const [journeyDeal, setJourneyDeal] = useState<Deal | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<Deal | null>(null);
+
+  const confirmDelete = () => {
+    if (!deleteCandidate) return;
+    deleteDeal(deleteCandidate.id);
+    const name = clients.find(c => c.id === deleteCandidate.clientId)?.companyName || 'Deal';
+    toast.success(`${name} — ${deleteCandidate.typeOfInsurance || 'deal'} removed.`);
+    setDeleteCandidate(null);
+  };
 
   // If we have a journey deal selected, render the dedicated journey page.
   if (journeyDeal) {
@@ -251,6 +261,13 @@ export const PipelineView = () => {
                         >
                           <GitBranch className="w-4 h-4" />
                         </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setDeleteCandidate(deal); }}
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                          title="Delete Deal"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -279,11 +296,62 @@ export const PipelineView = () => {
         <DealDetailForm deal={editDeal} onClose={() => setEditDeal(null)} />
       )}
       {socDeal && (
-        <SOCManagerModal 
-          deal={socDeal} 
-          client={clients.find(c => c.id === socDeal.clientId)!} 
-          onClose={() => setSocDeal(null)} 
+        <SOCManagerModal
+          deal={socDeal}
+          client={clients.find(c => c.id === socDeal.clientId)!}
+          onClose={() => setSocDeal(null)}
         />
+      )}
+
+      {deleteCandidate && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-md flex flex-col animate-in fade-in zoom-in-95 duration-200">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-[15px] font-bold text-slate-900">Delete pipeline deal?</h3>
+                  <p className="text-[12px] text-slate-500 mt-0.5">This cannot be undone.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setDeleteCandidate(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-3 text-[13px] text-slate-700">
+              <p>
+                You're about to remove the deal for{' '}
+                <span className="font-semibold">
+                  {clients.find(c => c.id === deleteCandidate.clientId)?.companyName || 'Unknown Client'}
+                </span>{' '}
+                <span className="text-slate-500">({deleteCandidate.typeOfInsurance || 'no insurance type'})</span>.
+              </p>
+              <p className="text-[12px] text-slate-500">
+                Its stage history, approval log, commission and document references will be deleted with it.
+                Related claims and endorsements will remain but lose their link.
+              </p>
+            </div>
+            <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 flex justify-end gap-2 rounded-b-lg">
+              <button
+                onClick={() => setDeleteCandidate(null)}
+                className="px-4 py-2 text-[13px] font-semibold text-slate-600 hover:bg-slate-100 rounded-md"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-4 py-2 text-[13px] font-semibold text-white bg-red-600 hover:bg-red-700 rounded-md shadow-sm flex items-center gap-1.5"
+              >
+                <Trash2 className="w-4 h-4" /> Delete deal
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
