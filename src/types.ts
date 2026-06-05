@@ -145,6 +145,8 @@ export interface Deal {
   approvalLog?: DealApprovalLogEntry[];
   /** Per-deal history of stage transitions with optional notes. */
   stageLog?: DealStageLogEntry[];
+  /** Set when the deal is bound (via the pipeline Bind action). Anchors invoice aging. */
+  bindDate?: string;
   coverNoteNumber?: string;
   originalPolicyFile?: string;
   /** Additional named parties on the policy (QQ = atas nama). Max 5. */

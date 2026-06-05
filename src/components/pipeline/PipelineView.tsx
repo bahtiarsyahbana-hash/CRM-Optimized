@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useData } from '../../context/DataContext';
 import { Deal, DealType } from '../../types';
-import { Plus, Search, Building2, Edit2, Upload, GitBranch, Trash2, AlertTriangle, X } from 'lucide-react';
+import { Plus, Search, Building2, Edit2, Upload, GitBranch, Trash2, AlertTriangle, X, ShieldCheck } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
 import { DealDetailForm } from '../clients/DealDetailForm';
@@ -11,7 +11,7 @@ import { DealJourneyView } from './DealJourneyView';
 import { ApprovalActionMenu, ApprovalStatusBadge } from './ApprovalActionMenu';
 
 export const PipelineView = () => {
-  const { deals, clients, deleteDeal } = useData();
+  const { deals, clients, deleteDeal, bindDeal } = useData();
   const [activeTab, setActiveTab] = useState<DealType>('New Business');
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<string>('All');
@@ -22,6 +22,25 @@ export const PipelineView = () => {
   const [socDeal, setSocDeal] = useState<Deal | null>(null);
   const [journeyDeal, setJourneyDeal] = useState<Deal | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Deal | null>(null);
+  const [bindCandidate, setBindCandidate] = useState<Deal | null>(null);
+
+  const confirmBind = () => {
+    if (!bindCandidate) return;
+    if (!bindCandidate.insuranceCompany) {
+      toast.error('Insurance Company is required before binding. Edit the deal first.');
+      setEditDeal(bindCandidate);
+      setBindCandidate(null);
+      return;
+    }
+    const ok = bindDeal(bindCandidate.id);
+    if (!ok) {
+      toast.error('Could not bind this deal.');
+      return;
+    }
+    const name = clients.find(c => c.id === bindCandidate.clientId)?.companyName || 'Deal';
+    toast.success(`${name} bound and added to Policies.`);
+    setBindCandidate(null);
+  };
 
   const confirmDelete = () => {
     if (!deleteCandidate) return;
@@ -237,6 +256,15 @@ export const PipelineView = () => {
                     </td>
                     <td className="px-6 py-3 text-right">
                       <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {deal.statusStage !== 'Policy On Progress' && deal.statusStage !== 'Lost' && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setBindCandidate(deal); }}
+                            className="text-[11px] font-semibold text-white bg-emerald-600 hover:bg-emerald-700 px-2 py-1 rounded transition-colors flex items-center gap-1 shadow-sm"
+                            title="Bind — move to Policy On Progress and add to Policies"
+                          >
+                            <ShieldCheck className="w-3 h-3" /> Bind
+                          </button>
+                        )}
                         <ApprovalActionMenu deal={deal} />
                         <button
                           onClick={(e) => handleGenerateSOC(e, deal)}
@@ -301,6 +329,57 @@ export const PipelineView = () => {
           client={clients.find(c => c.id === socDeal.clientId)!}
           onClose={() => setSocDeal(null)}
         />
+      )}
+
+      {bindCandidate && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-md flex flex-col animate-in fade-in zoom-in-95 duration-200">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-[15px] font-bold text-slate-900">Bind this deal?</h3>
+                  <p className="text-[12px] text-slate-500 mt-0.5">Move to <span className="font-semibold">Policy On Progress</span> and list under Policies.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setBindCandidate(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-3 text-[13px] text-slate-700">
+              <p>
+                <span className="font-semibold">
+                  {clients.find(c => c.id === bindCandidate.clientId)?.companyName || 'Unknown Client'}
+                </span>{' '}
+                <span className="text-slate-500">— {bindCandidate.typeOfInsurance || 'no insurance type'} • {bindCandidate.insuranceCompany || 'No insurer set'}</span>
+              </p>
+              <ul className="text-[12px] text-slate-500 space-y-1 pl-4 list-disc">
+                <li>Bind date is stamped to today, anchoring invoice aging (30 / 90 / 120 day reminders).</li>
+                <li>The deal becomes visible on the Policies list.</li>
+                <li>Any New Business deal is also auto-rolled to the Renewal track for next cycle.</li>
+              </ul>
+            </div>
+            <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 flex justify-end gap-2 rounded-b-lg">
+              <button
+                onClick={() => setBindCandidate(null)}
+                className="px-4 py-2 text-[13px] font-semibold text-slate-600 hover:bg-slate-100 rounded-md"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmBind}
+                className="px-4 py-2 text-[13px] font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-md shadow-sm flex items-center gap-1.5"
+              >
+                <ShieldCheck className="w-4 h-4" /> Bind &amp; Add to Policies
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {deleteCandidate && (

@@ -38,6 +38,9 @@ interface DataContextType {
   deleteDeal: (id: string) => void;
   updateDealStage: (id: string, newStage: DealStage, notes?: string) => void;
   recordApproval: (id: string, action: DealApprovalAction, notes?: string) => void;
+  /** Move a deal to Policy On Progress and stamp bindDate. Returns false if the
+   *  deal is missing an insurance company (required to bind). */
+  bindDeal: (id: string, notes?: string) => boolean;
   addClaim: (claim: Omit<Claim, 'id' | 'dateRegistered'>) => void;
   updateClaimStatus: (id: string, status: Claim['status']) => void;
   addEndorsement: (endorsement: Omit<Endorsement, 'id' | 'dateRequested'>) => void;
@@ -173,6 +176,59 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     saveAll('historyLogs', newLogs);
   };
 
+  const bindDeal = (id: string, notes?: string): boolean => {
+    const deal = deals.find(d => d.id === id);
+    if (!deal) return false;
+    if (!deal.insuranceCompany) return false;
+
+    const nowIso = new Date().toISOString();
+    const wasAlreadyOnProgress = deal.statusStage === 'Policy On Progress';
+
+    // Append stage transition log only if the stage actually changes.
+    const updatedDeal: Deal = {
+      ...deal,
+      statusStage: 'Policy On Progress',
+      bindDate: deal.bindDate || nowIso,
+      stageLog: wasAlreadyOnProgress
+        ? deal.stageLog
+        : [
+            ...(deal.stageLog || []),
+            {
+              fromStage: deal.statusStage,
+              toStage: 'Policy On Progress',
+              notes: (notes?.trim()) || 'Bound from pipeline.',
+              at: nowIso,
+            },
+          ],
+      // Auto-flip dealType for new business so it shows up in the renewal track next cycle.
+      dealType: deal.dealType === 'New Business' ? 'Renewal' : deal.dealType,
+      updatedAt: nowIso,
+    };
+
+    setDeals(prev => {
+      const newDeals = prev.map(d => d.id === id ? updatedDeal : d);
+      saveAll('deals', newDeals);
+      return newDeals;
+    });
+
+    if (!wasAlreadyOnProgress) {
+      const newLog: HistoryLog = {
+        id: uuidv4(),
+        dealId: id,
+        fromStage: deal.statusStage,
+        toStage: 'Policy On Progress',
+        date: nowIso,
+      };
+      setHistoryLogs(prev => {
+        const newLogs = [...prev, newLog];
+        saveAll('historyLogs', newLogs);
+        return newLogs;
+      });
+    }
+
+    return true;
+  };
+
   const recordApproval = (id: string, action: DealApprovalAction, notes?: string) => {
     const deal = deals.find(d => d.id === id);
     if (!deal) return;
@@ -247,7 +303,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <DataContext.Provider value={{
       clients, deals, claims, endorsements, historyLogs,
       addClient, updateClient, deleteClient,
-      addDeal, updateDeal, deleteDeal, updateDealStage, recordApproval,
+      addDeal, updateDeal, deleteDeal, updateDealStage, recordApproval, bindDeal,
       addClaim, updateClaimStatus, addEndorsement, updateEndorsementStatus,
       clearDatabase
     }}>

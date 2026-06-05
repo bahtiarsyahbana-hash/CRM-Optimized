@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import { useData } from '../../context/DataContext';
-import { FileText, Download, Upload, ShieldAlert, FileEdit, ExternalLink, X, Search } from 'lucide-react';
+import { FileText, ExternalLink, X, Search, Receipt } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { Deal, Client } from '../../types';
+import { Deal } from '../../types';
 import toast from 'react-hot-toast';
 import { generateCoverNote } from '../../utils/coverNoteGenerator';
 import { PolicyPreviewModal } from './PolicyPreviewModal';
+import { InvoiceModal } from './InvoiceModal';
+import { getInvoiceAging } from '../../utils/invoiceAging';
 
 export const PoliciesView = () => {
-  const { deals, clients, updateDeal, addClaim, addEndorsement } = useData();
+  const { deals, clients, updateDeal } = useData();
   const [searchTerm, setSearchTerm] = useState('');
   // Single-month filter against periodStart — "show policies whose period starts in this month"
   const [periodStartMonth, setPeriodStartMonth] = useState(''); // format: YYYY-MM
@@ -43,6 +45,7 @@ export const PoliciesView = () => {
   const clearPeriodFilters = () => setPeriodStartMonth('');
 
   const [selectedPolicy, setSelectedPolicy] = useState<Deal | null>(null);
+  const [invoicePolicy, setInvoicePolicy] = useState<Deal | null>(null);
 
   const handleUploadOriginal = (dealId: string) => {
     // Simulate upload process
@@ -126,6 +129,7 @@ export const PoliciesView = () => {
               <th className="px-6 py-3">Period</th>
               <th className="px-6 py-3">Sum Insured</th>
               <th className="px-6 py-3">Premium</th>
+              <th className="px-6 py-3">Invoice</th>
               <th className="px-6 py-3">Original Policy</th>
               <th className="px-6 py-3 text-right">Actions</th>
             </tr>
@@ -162,6 +166,29 @@ export const PoliciesView = () => {
                      )}
                   </td>
                   <td className="px-6 py-4">
+                    {(() => {
+                      const aging = getInvoiceAging(policy);
+                      return (
+                        <div className="flex flex-col gap-1">
+                          <span className={cn(
+                            'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border w-fit',
+                            aging.className
+                          )}>
+                            {policy.paymentStatus === 'Paid' ? 'Paid' : aging.label}
+                          </span>
+                          {policy.paymentStatus !== 'Paid' && policy.invoiceDate && (
+                            <span className="text-[10px] text-slate-400">
+                              Inv: {new Date(policy.invoiceDate).toLocaleDateString()}
+                            </span>
+                          )}
+                          {!policy.invoiceDate && policy.paymentStatus !== 'Paid' && (
+                            <span className="text-[10px] text-slate-400 italic">no invoice yet</span>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </td>
+                  <td className="px-6 py-4">
                     {policy.originalPolicyFile ? (
                       <div className="flex items-center gap-2 text-[12px] font-medium text-blue-600 bg-blue-50 px-2.5 py-1.5 rounded w-fit">
                         <FileText className="w-3.5 h-3.5" />
@@ -173,7 +200,14 @@ export const PoliciesView = () => {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <button 
+                      <button
+                        onClick={() => setInvoicePolicy(policy)}
+                        className="px-2 py-1 text-[11px] font-semibold text-slate-600 hover:text-blue-700 bg-slate-100 hover:bg-blue-50 rounded transition-colors flex items-center gap-1"
+                        title="Manage Invoice"
+                      >
+                        <Receipt className="w-3.5 h-3.5" /> Invoice
+                      </button>
+                      <button
                          onClick={() => setSelectedPolicy(policy)}
                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                          title="Manage Policy"
@@ -188,8 +222,8 @@ export const PoliciesView = () => {
             
             {policies.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-6 py-12 text-center text-slate-500 text-[13px]">
-                  No policies found. Move deals to "Policy On Progress" to manage them here.
+                <td colSpan={7} className="px-6 py-12 text-center text-slate-500 text-[13px]">
+                  No policies found. Bind a deal from the Pipeline to add it here.
                 </td>
               </tr>
             )}
@@ -198,12 +232,20 @@ export const PoliciesView = () => {
       </div>
 
       {selectedPolicy && (
-        <PolicyPreviewModal 
-           policy={selectedPolicy} 
+        <PolicyPreviewModal
+           policy={selectedPolicy}
            client={clients.find(c => c.id === selectedPolicy.clientId)!}
            onClose={() => setSelectedPolicy(null)}
            onUploadOriginal={() => handleUploadOriginal(selectedPolicy.id)}
            onDownloadCoverNote={() => handleDownloadCoverNote(selectedPolicy)}
+        />
+      )}
+
+      {invoicePolicy && (
+        <InvoiceModal
+          policy={deals.find(d => d.id === invoicePolicy.id) || invoicePolicy}
+          clientName={clients.find(c => c.id === invoicePolicy.clientId)?.companyName || 'Unknown Client'}
+          onClose={() => setInvoicePolicy(null)}
         />
       )}
     </div>

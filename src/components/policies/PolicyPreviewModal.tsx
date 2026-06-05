@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Deal, Client, Currency, CURRENCIES } from '../../types';
-import { X, Download, Upload, ShieldAlert, FileEdit, FileText } from 'lucide-react';
+import { X, Download, Upload, ShieldAlert, FileEdit, FileText, AlertTriangle } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 import toast from 'react-hot-toast';
+import { canFileClaim, getInvoiceAging } from '../../utils/invoiceAging';
 
 interface Props {
   policy: Deal;
@@ -26,11 +27,15 @@ export const PolicyPreviewModal = ({ policy, client, onClose, onUploadOriginal, 
   const [claimEstimatedAmount, setClaimEstimatedAmount] = useState<string>('');
   const [claimCurrency, setClaimCurrency] = useState<Currency>((policy.currency as Currency) || 'IDR');
 
+  const claimGate = canFileClaim(policy);
+  const invoiceAging = getInvoiceAging(policy);
+
   const handleAftersalesSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!requestTitle || !requestDescription) return toast.error('All fields required');
 
     if (requestType === 'claim') {
+      if (!claimGate.allowed) return toast.error(claimGate.reason || 'Claim cannot be submitted.');
       if (!claimDateReported) return toast.error('Date Reported is required for claims');
       const estAmount = claimEstimatedAmount ? parseFloat(claimEstimatedAmount.replace(/,/g, '')) : undefined;
       addClaim({
@@ -146,7 +151,19 @@ export const PolicyPreviewModal = ({ policy, client, onClose, onUploadOriginal, 
           )}
 
           {activeTab === 'aftersales' && (
-            <div className="max-w-2xl mx-auto py-4">
+            <div className="max-w-2xl mx-auto py-4 space-y-4">
+              {requestType === 'claim' && !claimGate.allowed && (
+                <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-[13px] text-red-800">
+                  <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-semibold">Claim blocked — invoice not paid</div>
+                    <div className="mt-0.5 text-[12px]">{claimGate.reason}</div>
+                    <div className="mt-1 text-[12px] text-red-700">
+                      Current invoice aging: <span className="font-semibold">{invoiceAging.label}</span>.
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
                 <form onSubmit={handleAftersalesSubmit}>
                   <div className="flex space-x-6 mb-8 border-b border-slate-100 pb-6">
@@ -231,7 +248,17 @@ export const PolicyPreviewModal = ({ policy, client, onClose, onUploadOriginal, 
                   </div>
 
                   <div className="mt-8 pt-6 border-t border-slate-100 flex justify-end">
-                    <button type="submit" className={`px-6 py-2.5 rounded-md font-semibold text-[13px] text-white shadow-sm transition-colors ${requestType === 'claim' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                    <button
+                      type="submit"
+                      disabled={requestType === 'claim' && !claimGate.allowed}
+                      className={`px-6 py-2.5 rounded-md font-semibold text-[13px] text-white shadow-sm transition-colors ${
+                        requestType === 'claim' && !claimGate.allowed
+                          ? 'bg-slate-300 cursor-not-allowed'
+                          : requestType === 'claim'
+                            ? 'bg-red-600 hover:bg-red-700'
+                            : 'bg-blue-600 hover:bg-blue-700'
+                      }`}
+                    >
                       Submit {requestType === 'claim' ? 'Claim' : 'Endorsement'}
                     </button>
                   </div>
