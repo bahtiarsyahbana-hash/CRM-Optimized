@@ -67,7 +67,24 @@ export interface DealCommission {
   taxPercent?: number;
   /** Optional cashback paid to a sales agent. */
   agentName?: string;
+  /** Numeric value of the cashback. Interpretation depends on `agentCashbackType`. */
   agentCashback?: number;
+  /** How to interpret `agentCashback`: as a percentage of premium, or a fixed currency amount. */
+  agentCashbackType?: 'percent' | 'fixed';
+}
+
+export type ProductType = 'General Insurance' | 'Marine Cargo' | 'Custom';
+export const PRODUCT_TYPES: ProductType[] = ['General Insurance', 'Marine Cargo', 'Custom'];
+
+export type DealApprovalStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Rejected';
+
+export interface DealDocuments {
+  termsCondition?: string;
+  personalInformation?: string; // KTP / NPWP
+  surveyReport?: string;
+  existingPolicy?: string;
+  otherDocument?: string;
+  additionalInfo?: string; // free-text notes
 }
 
 export type PaymentStatus = 'Unpaid' | 'Paid';
@@ -75,8 +92,11 @@ export type PaymentStatus = 'Unpaid' | 'Paid';
 export interface Deal {
   id: string;
   clientId: string;
+  /** Deal-level client address. Defaults to the client's companyAddress at create time but can be edited. */
+  clientAddress?: string;
   dealType: DealType;
   typeOfInsurance: string;
+  productType?: ProductType;
   sumInsured?: number;
   sumInsuredBreakdown?: { assetName: string; amount: number }[];
   currency: string;
@@ -91,6 +111,14 @@ export interface Deal {
   notes?: string;
   periodStart?: string;
   periodEnd?: string;
+  /** Deal-level PIC, may differ from the master client PIC. */
+  picName?: string;
+  picEmail?: string;
+  picPhone?: string;
+  /** Optional supporting documents (filenames only — actual storage is TBD). */
+  documents?: DealDocuments;
+  /** Approval workflow status set on the preview step of the wizard. */
+  approvalStatus?: DealApprovalStatus;
   coverNoteNumber?: string;
   originalPolicyFile?: string;
   /** Additional named parties on the policy (QQ = atas nama). Max 5. */

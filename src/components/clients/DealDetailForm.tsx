@@ -1,41 +1,152 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useData } from '../../context/DataContext';
-import { Deal, DealType, DealStage, PaymentStatus } from '../../types';
+import {
+  Deal,
+  DealType,
+  DealStage,
+  PaymentStatus,
+  ProductType,
+  PRODUCT_TYPES,
+  DealApprovalStatus,
+  DealDocuments,
+} from '../../types';
 import { defaultCommissionRate, DEFAULT_TAX_PERCENT } from '../../utils/commissionCalc';
-import { X, Save } from 'lucide-react';
+import {
+  X,
+  ChevronLeft,
+  ChevronRight,
+  Check,
+  Building2,
+  Shield,
+  ClipboardList,
+  Percent,
+  Eye,
+  Upload,
+  FileText,
+  Send,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { INSURANCE_COMPANIES } from '../../constants/insuranceCompanies';
+import { cn } from '../../lib/utils';
 
-export const DealDetailForm = ({ 
-  deal, 
-  onClose 
-}: { 
-  deal?: Deal | null, 
-  onClose: () => void 
+/* -------------------------------------------------------------------------- */
+/*                             Wizard step config                             */
+/* -------------------------------------------------------------------------- */
+
+type StepKey = 'client' | 'coverage' | 'status' | 'commission' | 'preview';
+
+interface StepDef {
+  key: StepKey;
+  label: string;
+  hint: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+const STEPS: StepDef[] = [
+  { key: 'client',     label: 'Client Information', hint: 'Pick the company',           icon: Building2     },
+  { key: 'coverage',   label: 'Insurance Coverage', hint: 'Risk & policy details',      icon: Shield        },
+  { key: 'status',     label: 'Status & Documents', hint: 'Stage and attachments',      icon: ClipboardList },
+  { key: 'commission', label: 'Commission',         hint: 'Rates, agent, cashback',     icon: Percent       },
+  { key: 'preview',    label: 'Preview & Submit',   hint: 'Review, send for approval',  icon: Eye           },
+];
+
+/* -------------------------------------------------------------------------- */
+/*                                  Helpers                                   */
+/* -------------------------------------------------------------------------- */
+
+const formatNumber = (value: string) => {
+  const num = value.replace(/[^0-9.]/g, '');
+  if (!num) return '';
+  const parts = num.split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return parts.join('.');
+};
+
+const parseNum = (v: string): number | undefined =>
+  v && v.trim() !== '' ? parseFloat(v.replace(/,/g, '')) : undefined;
+
+/* -------------------------------------------------------------------------- */
+/*                                Main wizard                                 */
+/* -------------------------------------------------------------------------- */
+
+export const DealDetailForm = ({
+  deal,
+  onClose,
+}: {
+  deal?: Deal | null;
+  onClose: () => void;
 }) => {
   const { addDeal, updateDeal, clients } = useData();
 
+  /* ----- Step navigation ----- */
+  const [stepIdx, setStepIdx] = useState(0);
+  const currentStep = STEPS[stepIdx];
+
+  /* ----- Step 1: Client ----- */
   const [clientId, setClientId] = useState(deal?.clientId || '');
+  const [clientAddress, setClientAddress] = useState(deal?.clientAddress || '');
+
+  const selectedClient = useMemo(
+    () => clients.find(c => c.id === clientId) || null,
+    [clientId, clients]
+  );
+
+  // Auto-fill the deal-level address when the client changes, but never overwrite
+  // a value the user has already typed.
+  useEffect(() => {
+    if (!selectedClient) return;
+    if (clientAddress.trim() === '') {
+      setClientAddress(selectedClient.companyAddress || '');
+    }
+    // Same for PIC fields below — auto-fill from master client only if blank.
+    setPicName(prev => prev || selectedClient.picName || '');
+    setPicEmail(prev => prev || selectedClient.picEmail || '');
+    setPicPhone(prev => prev || selectedClient.picPhone || '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClient?.id]);
+
+  /* ----- Step 2: Coverage ----- */
   const [dealType, setDealType] = useState<DealType>(deal?.dealType || 'New Business');
   const [typeOfInsurance, setTypeOfInsurance] = useState(deal?.typeOfInsurance || '');
-  const [sumInsured, setSumInsured] = useState<string>(deal?.sumInsured?.toString() || '');
-  const [isMultipleAssets, setIsMultipleAssets] = useState<boolean>(!!deal?.sumInsuredBreakdown && deal.sumInsuredBreakdown.length > 0);
-  const [sumInsuredBreakdown, setSumInsuredBreakdown] = useState<{ assetName: string; amount: string }[]>(
-    deal?.sumInsuredBreakdown?.map(b => ({ assetName: b.assetName, amount: b.amount.toString() })) || [{ assetName: '', amount: '' }]
+  const [productType, setProductType] = useState<ProductType | ''>(deal?.productType || '');
+  const [sumInsured, setSumInsured] = useState<string>(
+    deal?.sumInsured != null ? formatNumber(deal.sumInsured.toString()) : ''
   );
   const [currency, setCurrency] = useState(deal?.currency || 'IDR');
   const [premiumType, setPremiumType] = useState(deal?.premiumType || 'Estimated Premium');
-  const [premiumAmount, setPremiumAmount] = useState<string>(deal?.premiumAmount?.toString() || '');
-  const [premiumRate, setPremiumRate] = useState<string>(deal?.premiumRate || '');
-  const [insuranceCompany, setInsuranceCompany] = useState(deal?.insuranceCompany || '');
-  const [periodStart, setPeriodStart] = useState(deal?.periodStart ? new Date(deal.periodStart).toISOString().split('T')[0] : '');
-  const [periodEnd, setPeriodEnd] = useState(deal?.periodEnd ? new Date(deal.periodEnd).toISOString().split('T')[0] : '');
-  const [statusStage, setStatusStage] = useState<DealStage>(deal?.statusStage || 'Leads');
+  const [premiumAmount, setPremiumAmount] = useState<string>(
+    deal?.premiumAmount != null ? formatNumber(deal.premiumAmount.toString()) : ''
+  );
   const [riskLocation, setRiskLocation] = useState(deal?.riskLocation || '');
-  const [riskDetail, setRiskDetail] = useState(deal?.riskDetail || '');
-  const [notes, setNotes] = useState(deal?.notes || '');
-  const [qqList, setQqList] = useState<string[]>(deal?.qq || []);
+  const [periodStart, setPeriodStart] = useState(
+    deal?.periodStart ? new Date(deal.periodStart).toISOString().split('T')[0] : ''
+  );
+  const [periodEnd, setPeriodEnd] = useState(
+    deal?.periodEnd ? new Date(deal.periodEnd).toISOString().split('T')[0] : ''
+  );
+  const [picName, setPicName] = useState(deal?.picName || '');
+  const [picEmail, setPicEmail] = useState(deal?.picEmail || '');
+  const [picPhone, setPicPhone] = useState(deal?.picPhone || '');
+  const [insuranceCompany, setInsuranceCompany] = useState(deal?.insuranceCompany || '');
 
+  /* ----- Step 3: Status & Documents ----- */
+  const [statusStage, setStatusStage] = useState<DealStage>(deal?.statusStage || 'Leads');
+  const [documents, setDocuments] = useState<DealDocuments>(deal?.documents || {});
+
+  // statusStage available options depend on dealType
+  const statusStageOptions: DealStage[] = ['Renewal', 'Existing Client Update'].includes(dealType)
+    ? ['Policy On Progress', 'Data Collection', 'Quote', 'Nego', 'Bind / Closed Won', 'Lost']
+    : ['Leads', 'Data Collection', 'Quote', 'Nego', 'Bind / Closed Won', 'Policy On Progress', 'Lost'];
+
+  // Keep statusStage in sync if dealType makes the current option invalid.
+  useEffect(() => {
+    if (!statusStageOptions.includes(statusStage)) {
+      setStatusStage(statusStageOptions[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dealType]);
+
+  /* ----- Step 4: Commission ----- */
   const [baseRate, setBaseRate] = useState<string>(
     deal?.commission?.baseRate != null ? String(deal.commission.baseRate) : ''
   );
@@ -52,516 +163,914 @@ export const DealDetailForm = ({
   const [agentCashback, setAgentCashback] = useState<string>(
     deal?.commission?.agentCashback != null ? String(deal.commission.agentCashback) : ''
   );
-  const [invoiceDate, setInvoiceDate] = useState<string>(
+  const [agentCashbackType, setAgentCashbackType] = useState<'percent' | 'fixed'>(
+    deal?.commission?.agentCashbackType || 'fixed'
+  );
+
+  // Auto-suggest base commission once a Type of Insurance is chosen.
+  useEffect(() => {
+    if (typeOfInsurance && !baseRate) {
+      setBaseRate(String(defaultCommissionRate(selectedClient || undefined, typeOfInsurance)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typeOfInsurance, selectedClient?.id]);
+
+  /* ----- Step 5: Preview / approval ----- */
+  // Pre-existing invoicing fields are preserved silently — out of scope of this wizard,
+  // but we keep them so editing an old deal doesn't lose data.
+  const [invoiceDate] = useState<string>(
     deal?.invoiceDate ? new Date(deal.invoiceDate).toISOString().split('T')[0] : ''
   );
-  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>(deal?.paymentStatus || 'Unpaid');
-  const [paymentDate, setPaymentDate] = useState<string>(
+  const [paymentStatus] = useState<PaymentStatus>(deal?.paymentStatus || 'Unpaid');
+  const [paymentDate] = useState<string>(
     deal?.paymentDate ? new Date(deal.paymentDate).toISOString().split('T')[0] : ''
   );
 
-  const selectedClient = clients.find(c => c.id === clientId);
-  const showCommissionSection = dealType === 'New Business' || dealType === 'Renewal';
+  /* ----- Per-step validity ----- */
+  const stepErrors: Record<StepKey, string[]> = {
+    client: !clientId ? ['Please select a client.'] : [],
+    coverage: [
+      !dealType ? 'Deal Type is required.' : null,
+      !typeOfInsurance ? 'Type of Insurance is required.' : null,
+      !productType ? 'Product Type is required.' : null,
+      !premiumType ? 'Premium Type is required.' : null,
+    ].filter(Boolean) as string[],
+    status: !statusStage ? ['Status Stage is required.'] : [],
+    commission: [
+      baseRate === '' ? 'Base Commission % is required.' : null,
+      discountPercent && baseRate && parseFloat(discountPercent) > parseFloat(baseRate)
+        ? 'Discount % cannot exceed Base Commission %.'
+        : null,
+    ].filter(Boolean) as string[],
+    preview: [],
+  };
 
-  const insuranceTypeOptions = ['Property All Risk', 'Industrial All Risk', 'Fire Insurance', 'Earthquake Insurance', 'Marine Cargo', 'Marine Hull', 'Motor Vehicle', 'Heavy Equipment', 'Liability Insurance', 'Directors & Officers Liability', 'Professional Indemnity', 'Money Insurance', 'Fidelity Guarantee', 'Personal Accident', 'Group Term Life', 'Health Insurance', 'Travel Insurance', 'Cyber Insurance', 'Credit Insurance', 'Surety Bond', 'Other'];
-  const currencyOptions = ['IDR', 'USD', 'CNY', 'MYR', 'JPY', 'EUR'];
-  const premiumTypeOptions = ['Estimated Premium', 'Fixed Premium'];
-  const dealTypeOptions = ['New Business', 'Renewal', 'Cross Sell', 'Upsell', 'Existing Client Update'];
-  const statusStageOptions = ['Renewal', 'Existing Client Update'].includes(dealType)
-    ? ['Policy On Progress', 'Data Collection', 'Quote', 'Nego', 'Bind / Closed Won', 'Lost']
-    : ['Leads', 'Data Collection', 'Quote', 'Nego', 'Bind / Closed Won', 'Policy On Progress', 'Lost'];
+  const canAdvance = stepErrors[currentStep.key].length === 0;
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!clientId) {
-      toast.error('Please select a Client.');
+  const goNext = () => {
+    if (!canAdvance) {
+      stepErrors[currentStep.key].forEach(err => toast.error(err));
       return;
     }
-    if (!typeOfInsurance) {
-      toast.error('Please select Type of Insurance.');
-      return;
-    }
-    if (dealType === 'Renewal' && !insuranceCompany) {
-      toast.error('Insurance Company is required for Renewals.');
-      return;
-    }
-    if (statusStage === 'Policy On Progress' && !insuranceCompany) {
-      toast.error('Insurance Company is required for Policy On Progress.');
-      return;
-    }
-    if (showCommissionSection && discountPercent && baseRate && parseFloat(discountPercent) > parseFloat(baseRate)) {
-      toast.error('Discount % cannot exceed Base Commission %.');
-      return;
-    }
+    setStepIdx(i => Math.min(i + 1, STEPS.length - 1));
+  };
+  const goBack = () => setStepIdx(i => Math.max(i - 1, 0));
 
-    let finalSumInsured: number | undefined = undefined;
-    let finalBreakdown: { assetName: string; amount: number }[] | undefined = undefined;
-
-    if (isMultipleAssets) {
-      const validAssets = sumInsuredBreakdown.filter(b => b.assetName.trim() !== '' && b.amount.trim() !== '');
-      if (validAssets.length === 0) {
-        toast.error('Please add at least one valid asset sum insured.');
+  // Allow jumping back to any visited step, or forward only if all preceding
+  // steps are valid.
+  const goToStep = (target: number) => {
+    if (target <= stepIdx) {
+      setStepIdx(target);
+      return;
+    }
+    for (let i = stepIdx; i < target; i++) {
+      const errs = stepErrors[STEPS[i].key];
+      if (errs.length > 0) {
+        errs.forEach(err => toast.error(err));
         return;
       }
-      finalBreakdown = validAssets.map(b => ({
-        assetName: b.assetName,
-        amount: parseFloat(b.amount.replace(/,/g, ''))
-      }));
-      finalSumInsured = finalBreakdown.reduce((acc, curr) => acc + curr.amount, 0);
-    } else {
-      finalSumInsured = sumInsured ? parseFloat(sumInsured.replace(/,/g, '')) : undefined;
     }
+    setStepIdx(target);
+  };
 
-    const payload = {
-      clientId,
-      typeOfInsurance,
-      sumInsured: finalSumInsured,
-      sumInsuredBreakdown: finalBreakdown,
-      currency,
-      premiumType,
-      premiumAmount: premiumAmount ? parseFloat(premiumAmount.replace(/,/g, '')) : undefined,
-      premiumRate,
-      dealType: dealType as DealType,
-      insuranceCompany,
-      periodStart: periodStart ? new Date(periodStart).toISOString() : undefined,
-      periodEnd: periodEnd ? new Date(periodEnd).toISOString() : undefined,
-      statusStage: statusStage as DealStage,
-      riskLocation,
-      riskDetail,
-      notes,
-      qq: qqList.filter(q => q.trim()).length > 0 ? qqList.filter(q => q.trim()) : undefined,
-      commission: showCommissionSection ? {
-        baseRate: baseRate !== '' ? parseFloat(baseRate) : undefined,
-        discountPercent: discountPercent !== '' ? parseFloat(discountPercent) : undefined,
-        efCommissionPercent: efCommissionPercent !== '' ? parseFloat(efCommissionPercent) : undefined,
-        taxPercent: taxPercent !== '' ? parseFloat(taxPercent) : DEFAULT_TAX_PERCENT,
-        agentName: agentName || undefined,
-        agentCashback: agentCashback ? parseFloat(agentCashback.replace(/,/g, '')) : undefined,
-      } : undefined,
-      invoiceDate: showCommissionSection && invoiceDate ? new Date(invoiceDate).toISOString() : undefined,
-      paymentStatus: showCommissionSection && invoiceDate ? paymentStatus : undefined,
-      paymentDate: showCommissionSection && paymentStatus === 'Paid' && paymentDate ? new Date(paymentDate).toISOString() : undefined,
-    };
+  /* ----- Final submit ----- */
+  const buildPayload = (approval: DealApprovalStatus): Omit<Deal, 'id' | 'createdAt' | 'updatedAt'> => ({
+    clientId,
+    clientAddress: clientAddress || undefined,
+    dealType,
+    typeOfInsurance,
+    productType: (productType || undefined) as ProductType | undefined,
+    sumInsured: parseNum(sumInsured),
+    currency,
+    premiumType,
+    premiumAmount: parseNum(premiumAmount),
+    insuranceCompany: insuranceCompany || undefined,
+    periodStart: periodStart ? new Date(periodStart).toISOString() : undefined,
+    periodEnd: periodEnd ? new Date(periodEnd).toISOString() : undefined,
+    statusStage,
+    riskLocation: riskLocation || undefined,
+    picName: picName || undefined,
+    picEmail: picEmail || undefined,
+    picPhone: picPhone || undefined,
+    documents: Object.values(documents).some(v => v && String(v).trim() !== '') ? documents : undefined,
+    approvalStatus: approval,
+    commission: {
+      baseRate: parseNum(baseRate),
+      discountPercent: parseNum(discountPercent),
+      efCommissionPercent: parseNum(efCommissionPercent),
+      taxPercent: parseNum(taxPercent) ?? DEFAULT_TAX_PERCENT,
+      agentName: agentName || undefined,
+      agentCashback: parseNum(agentCashback),
+      agentCashbackType: agentCashback ? agentCashbackType : undefined,
+    },
+    invoiceDate: invoiceDate ? new Date(invoiceDate).toISOString() : undefined,
+    paymentStatus: invoiceDate ? paymentStatus : undefined,
+    paymentDate: paymentStatus === 'Paid' && paymentDate ? new Date(paymentDate).toISOString() : undefined,
+  });
 
+  const submitForApproval = () => {
+    // Re-check every step before submitting.
+    for (const s of STEPS) {
+      const errs = stepErrors[s.key];
+      if (errs.length > 0) {
+        errs.forEach(err => toast.error(`${s.label}: ${err}`));
+        setStepIdx(STEPS.findIndex(x => x.key === s.key));
+        return;
+      }
+    }
+    const payload = buildPayload('Pending Approval');
     if (deal) {
       updateDeal(deal.id, payload);
-      toast.success('Pipeline deal updated successfully');
+      toast.success('Deal updated and submitted for approval');
     } else {
       addDeal(payload);
-      toast.success('Pipeline deal created successfully');
+      toast.success('Deal created and submitted for approval');
     }
     onClose();
   };
 
-  const formatNumber = (value: string) => {
-    const num = value.replace(/[^0-9.]/g, '');
-    if (!num) return '';
-    const parts = num.split('.');
-    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-    return parts.join('.');
+  const saveDraft = () => {
+    const payload = buildPayload(deal?.approvalStatus || 'Draft');
+    if (deal) {
+      updateDeal(deal.id, payload);
+      toast.success('Draft saved');
+    } else {
+      if (!clientId) {
+        toast.error('Pick a client before saving a draft.');
+        return;
+      }
+      addDeal(payload);
+      toast.success('Draft created');
+    }
+    onClose();
   };
 
+  /* -------------------------------------------------------------------- */
+  /*                                Render                                */
+  /* -------------------------------------------------------------------- */
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-2xl flex flex-col w-full max-w-4xl max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-        
+      <div className="bg-white rounded-lg shadow-2xl flex flex-col w-full max-w-5xl max-h-[92vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+
+        {/* Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">{deal ? 'Edit Pipeline Deal' : 'Add Pipeline Deal'}</h2>
-            <p className="text-[13px] text-slate-500 mt-0.5">Track opportunities and policies.</p>
+            <h2 className="text-lg font-bold text-slate-900">{deal ? 'Edit Pipeline Deal' : 'New Pipeline Deal'}</h2>
+            <p className="text-[13px] text-slate-500 mt-0.5">
+              Step {stepIdx + 1} of {STEPS.length} — {currentStep.label}
+            </p>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-md transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 overflow-y-auto flex-1 bg-white">
-          <form id="deal-form" onSubmit={handleSubmit} className="space-y-8">
-            
-            <div className="bg-slate-50 rounded-lg p-5 border border-slate-100">
-              <h3 className="font-semibold text-slate-800 text-[14px] flex items-center gap-2 mb-4 border-b border-slate-200 pb-2">
-                <div className="w-6 h-6 rounded-md bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold">1</div>
-                Client Definition
-              </h3>
-              <div className="grid grid-cols-1 gap-5">
-                <div>
-                  <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Client / Company <span className="text-red-500">*</span></label>
-                  {clients.length === 0 ? (
-                    <div className="text-[13px] text-amber-600 bg-amber-50 p-3 rounded-md border border-amber-200">
-                      No clients found. Please create a Client Profile first in the Clients view.
-                    </div>
-                  ) : (
-                    <select value={clientId} onChange={e => setClientId(e.target.value)} required className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]">
-                      <option value="">Select a Client</option>
-                      {clients.map(c => <option key={c.id} value={c.id}>{c.companyName}</option>)}
-                    </select>
-                  )}
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-[12px] font-semibold text-slate-600">
-                      QQ <span className="text-slate-400 font-normal">(atas nama — additional named parties)</span>
-                    </label>
-                    {qqList.length < 5 && (
-                      <button
-                        type="button"
-                        onClick={() => setQqList([...qqList, ''])}
-                        className="text-[12px] font-medium text-blue-600 hover:text-blue-700"
-                      >
-                        + Add QQ
-                      </button>
+        {/* Stepper */}
+        <div className="px-6 pt-5 pb-4 border-b border-slate-100 bg-white shrink-0">
+          <ol className="flex items-center justify-between gap-2">
+            {STEPS.map((s, i) => {
+              const Icon = s.icon;
+              const done = i < stepIdx && stepErrors[s.key].length === 0;
+              const active = i === stepIdx;
+              const reachable = i <= stepIdx || STEPS.slice(0, i).every(p => stepErrors[p.key].length === 0);
+              return (
+                <li key={s.key} className="flex-1 flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => reachable && goToStep(i)}
+                    disabled={!reachable}
+                    className={cn(
+                      'flex items-center gap-2 group',
+                      reachable ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'
                     )}
-                  </div>
-                  {qqList.length === 0 ? (
-                    <p className="text-[12px] text-slate-400 italic">No QQ parties added.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {qqList.map((entry, i) => (
-                        <div key={i} className="flex gap-2 items-center">
-                          <span className="text-[11px] font-bold text-slate-400 w-6 shrink-0 text-center">QQ</span>
-                          <input
-                            type="text"
-                            value={entry}
-                            onChange={e => {
-                              const next = [...qqList];
-                              next[i] = e.target.value;
-                              setQqList(next);
-                            }}
-                            placeholder={`Party ${i + 1} name`}
-                            className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setQqList(qqList.filter((_, j) => j !== i))}
-                            className="p-2 text-slate-400 hover:text-red-500 bg-slate-50 hover:bg-red-50 border border-slate-200 rounded-md transition-colors shrink-0"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ))}
-                      {qqList.length >= 5 && (
-                        <p className="text-[11px] text-slate-400">Maximum 5 QQ parties reached.</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-              </div>
-            </div>
-
-            <div className="bg-slate-50 rounded-lg p-5 border border-slate-100">
-              <h3 className="font-semibold text-slate-800 text-[14px] flex items-center gap-2 mb-4 border-b border-slate-200 pb-2">
-                <div className="w-6 h-6 rounded-md bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold">2</div>
-                Insurance Details
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div>
-                  <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Deal Type <span className="text-red-500">*</span></label>
-                  <select 
-                    value={dealType} 
-                    onChange={e => {
-                      const newType = e.target.value as DealType;
-                      setDealType(newType);
-                      if (['Renewal', 'Existing Client Update'].includes(newType) && statusStage === 'Leads') {
-                        setStatusStage('Policy On Progress');
-                      }
-                    }} 
-                    required className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]">
-                    {dealTypeOptions.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Type of Insurance <span className="text-red-500">*</span></label>
-                  <select value={typeOfInsurance} onChange={e => {
-                    const newType = e.target.value;
-                    setTypeOfInsurance(newType);
-                    if (!deal || !baseRate) {
-                      setBaseRate(String(defaultCommissionRate(selectedClient, newType)));
-                    }
-                  }} required className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]">
-                    <option value="">Select Insurance Type</option>
-                    {insuranceTypeOptions.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                </div>
-                
-                <div className="md:col-span-2 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-[12px] font-semibold text-slate-600">Sum Insured <span className="text-slate-400 font-normal">({currency})</span></label>
-                    <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
-                      <input type="checkbox" checked={isMultipleAssets} onChange={(e) => setIsMultipleAssets(e.target.checked)} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                      Multiple Assets
-                    </label>
-                  </div>
-                  
-                  {!isMultipleAssets ? (
-                    <input type="text" value={sumInsured} onChange={e => setSumInsured(formatNumber(e.target.value))} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]" placeholder="1,000,000" />
-                  ) : (
-                    <div className="space-y-3 bg-white p-3 border border-slate-200 rounded-md">
-                      {sumInsuredBreakdown.map((item, index) => (
-                        <div key={index} className="flex gap-3">
-                          <input type="text" value={item.assetName} onChange={(e) => {
-                            const newBreakdown = [...sumInsuredBreakdown];
-                            newBreakdown[index].assetName = e.target.value;
-                            setSumInsuredBreakdown(newBreakdown);
-                          }} placeholder="Asset (e.g. Content)" className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]" />
-                          <input type="text" value={formatNumber(item.amount)} onChange={(e) => {
-                            const newBreakdown = [...sumInsuredBreakdown];
-                            newBreakdown[index].amount = formatNumber(e.target.value);
-                            setSumInsuredBreakdown(newBreakdown);
-                          }} placeholder="Amount" className="flex-[1.5] px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]" />
-                          {sumInsuredBreakdown.length > 1 && (
-                            <button type="button" onClick={() => {
-                              const newBreakdown = sumInsuredBreakdown.filter((_, i) => i !== index);
-                              setSumInsuredBreakdown(newBreakdown);
-                            }} className="p-2 text-slate-400 hover:text-red-500 bg-slate-50 hover:bg-red-50 border border-slate-200 rounded-md transition-colors shrink-0">
-                              <X className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                      <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                        {sumInsuredBreakdown.length < 3 ? (
-                          <button type="button" onClick={() => setSumInsuredBreakdown([...sumInsuredBreakdown, { assetName: '', amount: '' }])} className="text-[12px] font-medium text-blue-600 hover:text-blue-700">
-                            + Add Asset (Max 3)
-                          </button>
-                        ) : (
-                          <span className="text-[12px] text-slate-400">Maximum 3 assets reached.</span>
-                        )}
-                        <div className="text-[12px] text-slate-700 font-semibold">
-                          Total: {sumInsuredBreakdown.reduce((acc, curr) => acc + (parseFloat(curr.amount.replace(/,/g, '')) || 0), 0).toLocaleString()}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Currency <span className="text-red-500">*</span></label>
-                  <select value={currency} onChange={e => setCurrency(e.target.value)} required className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]">
-                    {currencyOptions.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Premium Type <span className="text-red-500">*</span></label>
-                  <select value={premiumType} onChange={e => setPremiumType(e.target.value)} required className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]">
-                    {premiumTypeOptions.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Premium Amount <span className="text-slate-400 font-normal">({currency})</span></label>
-                  <input type="text" value={premiumAmount} onChange={e => setPremiumAmount(formatNumber(e.target.value))} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]" placeholder="0" />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Premium Rate</label>
-                  <input type="text" value={premiumRate} onChange={e => setPremiumRate(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]" placeholder="e.g. 0.05% or from quotation" />
-                </div>
-
-                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <div>
-                    <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Period Start</label>
-                    <input type="date" value={periodStart} onChange={e => setPeriodStart(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]" />
-                  </div>
-                  <div>
-                    <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Period End</label>
-                    <input type="date" value={periodEnd} onChange={e => setPeriodEnd(e.target.value)} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]" />
-                  </div>
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Insurance Company {(dealType === 'Renewal' || statusStage === 'Policy On Progress') && <span className="text-red-500">*</span>}</label>
-                  <select 
-                    value={insuranceCompany} 
-                    onChange={e => setInsuranceCompany(e.target.value)} 
-                    required={dealType === 'Renewal' || statusStage === 'Policy On Progress'} 
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]"
                   >
-                    <option value="">Select Insurance Company</option>
-                    {INSURANCE_COMPANIES.map(company => (
-                      <option key={company} value={company}>{company}</option>
-                    ))}
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-              </div>
-            </div>
+                    <span
+                      className={cn(
+                        'w-8 h-8 rounded-full flex items-center justify-center border text-[12px] font-bold shrink-0 transition-colors',
+                        active && 'bg-blue-600 text-white border-blue-600',
+                        done && !active && 'bg-emerald-500 text-white border-emerald-500',
+                        !done && !active && 'bg-white text-slate-500 border-slate-300 group-hover:border-slate-400'
+                      )}
+                    >
+                      {done && !active ? <Check className="w-4 h-4" /> : <Icon className="w-4 h-4" />}
+                    </span>
+                    <span className="hidden md:flex flex-col text-left">
+                      <span
+                        className={cn(
+                          'text-[12px] font-semibold',
+                          active ? 'text-slate-900' : done ? 'text-slate-700' : 'text-slate-500'
+                        )}
+                      >
+                        {s.label}
+                      </span>
+                      <span className="text-[11px] text-slate-400">{s.hint}</span>
+                    </span>
+                  </button>
+                  {i < STEPS.length - 1 && (
+                    <div className={cn('flex-1 h-px mx-3', i < stepIdx ? 'bg-emerald-300' : 'bg-slate-200')} />
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
 
-            <div className="bg-slate-50 rounded-lg p-5 border border-slate-100">
-              <h3 className="font-semibold text-slate-800 text-[14px] flex items-center gap-2 mb-4 border-b border-slate-200 pb-2">
-                <div className="w-6 h-6 rounded-md bg-purple-100 text-purple-700 flex items-center justify-center text-xs font-bold">3</div>
-                Risk & Pipeline Status
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div className="md:col-span-2">
-                  <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Status Stage <span className="text-red-500">*</span></label>
-                  <select value={statusStage} onChange={e => setStatusStage(e.target.value as DealStage)} required className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]">
-                    {statusStageOptions.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                </div>
-                
-                <div className="md:col-span-2">
-                  <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Risk Location <span className="text-slate-400 font-normal">(if different from client address)</span></label>
-                  <textarea value={riskLocation} onChange={e => setRiskLocation(e.target.value)} rows={2} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px] resize-none" placeholder="Location of risk" />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Risk Detail <span className="text-slate-400 font-normal">(Optional)</span></label>
-                  <textarea value={riskDetail} onChange={e => setRiskDetail(e.target.value)} rows={3} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px] resize-none" placeholder="Underwriting notes, exposure notes..." />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Notes <span className="text-slate-400 font-normal">(Optional)</span></label>
-                  <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px] resize-none" placeholder="Follow up notes, communication history..." />
-                </div>
-              </div>
-            </div>
+        {/* Body */}
+        <div className="p-6 overflow-y-auto flex-1 bg-slate-50">
+          {currentStep.key === 'client' && (
+            <StepClient
+              clients={clients}
+              clientId={clientId}
+              setClientId={setClientId}
+              clientAddress={clientAddress}
+              setClientAddress={setClientAddress}
+              selectedClient={selectedClient}
+            />
+          )}
+          {currentStep.key === 'coverage' && (
+            <StepCoverage
+              {...{
+                dealType, setDealType,
+                typeOfInsurance, setTypeOfInsurance,
+                productType, setProductType,
+                sumInsured, setSumInsured,
+                currency, setCurrency,
+                premiumType, setPremiumType,
+                premiumAmount, setPremiumAmount,
+                riskLocation, setRiskLocation,
+                periodStart, setPeriodStart,
+                periodEnd, setPeriodEnd,
+                picName, setPicName,
+                picEmail, setPicEmail,
+                picPhone, setPicPhone,
+                insuranceCompany, setInsuranceCompany,
+              }}
+            />
+          )}
+          {currentStep.key === 'status' && (
+            <StepStatus
+              statusStage={statusStage}
+              setStatusStage={setStatusStage}
+              statusStageOptions={statusStageOptions}
+              documents={documents}
+              setDocuments={setDocuments}
+            />
+          )}
+          {currentStep.key === 'commission' && (
+            <StepCommission
+              {...{
+                baseRate, setBaseRate,
+                discountPercent, setDiscountPercent,
+                efCommissionPercent, setEfCommissionPercent,
+                taxPercent, setTaxPercent,
+                agentName, setAgentName,
+                agentCashback, setAgentCashback,
+                agentCashbackType, setAgentCashbackType,
+                currency,
+              }}
+            />
+          )}
+          {currentStep.key === 'preview' && (
+            <StepPreview
+              client={selectedClient}
+              data={{
+                clientAddress, dealType, typeOfInsurance, productType, sumInsured,
+                currency, premiumType, premiumAmount, riskLocation, periodStart, periodEnd,
+                picName, picEmail, picPhone, insuranceCompany, statusStage, documents,
+                baseRate, discountPercent, efCommissionPercent, taxPercent,
+                agentName, agentCashback, agentCashbackType,
+              }}
+            />
+          )}
+        </div>
 
-            {showCommissionSection && (
-              <div className="bg-slate-50 rounded-lg p-5 border border-slate-100">
-                <h3 className="font-semibold text-slate-800 text-[14px] flex items-center gap-2 mb-4 border-b border-slate-200 pb-2">
-                  <div className="w-6 h-6 rounded-md bg-amber-100 text-amber-700 flex items-center justify-center text-xs font-bold">4</div>
-                  Commission &amp; Invoicing
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <div>
-                    <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Base Commission %</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.01"
-                      value={baseRate}
-                      onChange={e => setBaseRate(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]"
-                      placeholder="e.g. 15"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">
-                      Discount to Client %
-                      {baseRate && <span className="text-[11px] font-normal text-slate-400 ml-1">max {baseRate}%</span>}
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      max={baseRate || undefined}
-                      step="0.01"
-                      value={discountPercent}
-                      onChange={e => setDiscountPercent(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]"
-                      placeholder="0"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">EF Commission %</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.01"
-                      value={efCommissionPercent}
-                      onChange={e => setEfCommissionPercent(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]"
-                      placeholder="0"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">PPh 23 Tax %</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.01"
-                      value={taxPercent}
-                      onChange={e => setTaxPercent(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]"
-                      placeholder="2"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Sales Agent Name</label>
-                    <input
-                      type="text"
-                      value={agentName}
-                      onChange={e => setAgentName(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]"
-                      placeholder="Agent name (optional)"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">
-                      Agent Cashback <span className="text-slate-400 font-normal">({currency})</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={agentCashback}
-                      onChange={e => setAgentCashback(formatNumber(e.target.value))}
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]"
-                      placeholder="0"
-                    />
-                  </div>
-                </div>
+        {/* Footer / nav */}
+        <div className="px-6 py-4 border-t border-slate-200 bg-white flex items-center justify-between gap-3 shrink-0 rounded-b-lg">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-[13px] font-semibold text-slate-600 hover:bg-slate-100 rounded-md transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={saveDraft}
+              className="px-4 py-2 text-[13px] font-semibold text-slate-700 border border-slate-200 hover:bg-slate-50 rounded-md transition-colors"
+            >
+              Save Draft
+            </button>
+          </div>
 
-                <div className="mt-5 pt-5 border-t border-slate-200">
-                  <div className="text-[12px] font-semibold text-slate-600 mb-3">Invoicing</div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    <div>
-                      <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Invoice Date</label>
-                      <input
-                        type="date"
-                        value={invoiceDate}
-                        onChange={e => setInvoiceDate(e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Payment Status</label>
-                      <div className="flex rounded-md overflow-hidden border border-slate-200">
-                        <button
-                          type="button"
-                          onClick={() => setPaymentStatus('Unpaid')}
-                          className={`flex-1 px-3 py-2 text-[13px] font-semibold transition-colors ${paymentStatus === 'Unpaid' ? 'bg-slate-700 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
-                        >
-                          Unpaid
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setPaymentStatus('Paid')}
-                          className={`flex-1 px-3 py-2 text-[13px] font-semibold transition-colors border-l border-slate-200 ${paymentStatus === 'Paid' ? 'bg-emerald-600 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
-                        >
-                          Paid
-                        </button>
-                      </div>
-                    </div>
-                    {paymentStatus === 'Paid' && (
-                      <div>
-                        <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Payment Date</label>
-                        <input
-                          type="date"
-                          value={paymentDate}
-                          onChange={e => setPaymentDate(e.target.value)}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]"
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+          <div className="flex items-center gap-2">
+            {stepIdx > 0 && (
+              <button
+                type="button"
+                onClick={goBack}
+                className="px-4 py-2 text-[13px] font-semibold text-slate-700 border border-slate-200 hover:bg-slate-50 rounded-md transition-colors flex items-center gap-1.5"
+              >
+                <ChevronLeft className="w-4 h-4" /> Back
+              </button>
             )}
 
-          </form>
+            {stepIdx < STEPS.length - 1 ? (
+              <button
+                type="button"
+                onClick={goNext}
+                disabled={!canAdvance}
+                className={cn(
+                  'px-5 py-2 text-[13px] font-semibold text-white rounded-md transition-colors flex items-center gap-1.5 shadow-sm',
+                  canAdvance ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-300 cursor-not-allowed'
+                )}
+              >
+                Next <ChevronRight className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={submitForApproval}
+                className="px-5 py-2 text-[13px] font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-md transition-colors flex items-center gap-1.5 shadow-sm"
+              >
+                <Send className="w-4 h-4" /> Submit for Approval
+              </button>
+            )}
+          </div>
         </div>
-
-        <div className="px-6 py-4 border-t border-slate-200 bg-white flex justify-end gap-3 shrink-0 rounded-b-lg">
-          <button type="button" onClick={onClose} className="px-5 py-2 font-semibold text-[13px] text-slate-600 hover:bg-slate-100 rounded-md transition-colors">
-            Cancel
-          </button>
-          <button type="submit" form="deal-form" disabled={clients.length === 0} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white font-semibold text-[13px] rounded-md transition-colors flex items-center gap-2 shadow-sm">
-            <Save className="w-4 h-4" />
-            {deal ? 'Save Changes' : 'Create Deal'}
-          </button>
-        </div>
-
       </div>
     </div>
   );
 };
+
+/* -------------------------------------------------------------------------- */
+/*                              Shared field UI                               */
+/* -------------------------------------------------------------------------- */
+
+const Field: React.FC<{
+  label: string;
+  required?: boolean;
+  hint?: string;
+  className?: string;
+  children: React.ReactNode;
+}> = ({ label, required, hint, children, className }) => (
+  <div className={className}>
+    <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">
+      {label}
+      {required && <span className="text-red-500 ml-0.5">*</span>}
+    </label>
+    {children}
+    {hint && <p className="mt-1 text-[11px] text-slate-500">{hint}</p>}
+  </div>
+);
+
+const inputClass =
+  'w-full px-3 py-2 bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-[13px]';
+
+/* -------------------------------------------------------------------------- */
+/*                              Step 1: Client                                */
+/* -------------------------------------------------------------------------- */
+
+const StepClient: React.FC<{
+  clients: ReturnType<typeof useData>['clients'];
+  clientId: string;
+  setClientId: (v: string) => void;
+  clientAddress: string;
+  setClientAddress: (v: string) => void;
+  selectedClient: ReturnType<typeof useData>['clients'][number] | null;
+}> = ({ clients, clientId, setClientId, clientAddress, setClientAddress, selectedClient }) => (
+  <div className="bg-white rounded-lg p-6 border border-slate-200 max-w-3xl mx-auto space-y-5">
+    <SectionTitle index={1} color="blue" label="Client Information" subtitle="Select an existing client and confirm their address." />
+
+    <Field label="Client / Company" required>
+      {clients.length === 0 ? (
+        <div className="text-[13px] text-amber-700 bg-amber-50 p-3 rounded-md border border-amber-200">
+          No clients found. Please create a Client Profile first in the Clients view.
+        </div>
+      ) : (
+        <select value={clientId} onChange={e => setClientId(e.target.value)} className={inputClass}>
+          <option value="">Select a Client</option>
+          {clients.map(c => (
+            <option key={c.id} value={c.id}>{c.companyName}</option>
+          ))}
+        </select>
+      )}
+    </Field>
+
+    {selectedClient && (
+      <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-[12px] text-slate-600">
+        <div className="font-semibold text-slate-800 mb-0.5">{selectedClient.companyName}</div>
+        <div>Line of Business: {selectedClient.lineOfBusiness}</div>
+        {selectedClient.parentGroup && <div>Parent Group: {selectedClient.parentGroup}</div>}
+        {selectedClient.sourceClient && <div>Source: {selectedClient.sourceClient}</div>}
+      </div>
+    )}
+
+    <Field
+      label="Client Address"
+      hint="Auto-filled from the client record. You can edit it freely for this deal."
+    >
+      <textarea
+        rows={3}
+        value={clientAddress}
+        onChange={e => setClientAddress(e.target.value)}
+        className={cn(inputClass, 'resize-none')}
+        placeholder="Full correspondence address..."
+      />
+    </Field>
+  </div>
+);
+
+/* -------------------------------------------------------------------------- */
+/*                            Step 2: Coverage                                */
+/* -------------------------------------------------------------------------- */
+
+interface StepCoverageProps {
+  dealType: DealType;                                 setDealType: (v: DealType) => void;
+  typeOfInsurance: string;                            setTypeOfInsurance: (v: string) => void;
+  productType: ProductType | '';                      setProductType: (v: ProductType | '') => void;
+  sumInsured: string;                                 setSumInsured: (v: string) => void;
+  currency: string;                                   setCurrency: (v: string) => void;
+  premiumType: string;                                setPremiumType: (v: string) => void;
+  premiumAmount: string;                              setPremiumAmount: (v: string) => void;
+  riskLocation: string;                               setRiskLocation: (v: string) => void;
+  periodStart: string;                                setPeriodStart: (v: string) => void;
+  periodEnd: string;                                  setPeriodEnd: (v: string) => void;
+  picName: string;                                    setPicName: (v: string) => void;
+  picEmail: string;                                   setPicEmail: (v: string) => void;
+  picPhone: string;                                   setPicPhone: (v: string) => void;
+  insuranceCompany: string;                           setInsuranceCompany: (v: string) => void;
+}
+
+const StepCoverage: React.FC<StepCoverageProps> = (p) => {
+  const insuranceTypeOptions = [
+    'Property All Risk', 'Industrial All Risk', 'Fire Insurance', 'Earthquake Insurance',
+    'Marine Cargo', 'Marine Hull', 'Motor Vehicle', 'Heavy Equipment', 'Liability Insurance',
+    'Directors & Officers Liability', 'Professional Indemnity', 'Money Insurance',
+    'Fidelity Guarantee', 'Personal Accident', 'Group Term Life', 'Health Insurance',
+    'Travel Insurance', 'Cyber Insurance', 'Credit Insurance', 'Surety Bond', 'Other',
+  ];
+  const currencyOptions = ['IDR', 'USD', 'CNY', 'MYR', 'JPY', 'EUR'];
+
+  return (
+    <div className="bg-white rounded-lg p-6 border border-slate-200 max-w-4xl mx-auto space-y-6">
+      <SectionTitle index={2} color="emerald" label="Insurance Coverage" subtitle="Define what's covered, for how much, and when." />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <Field label="Deal Type" required>
+          <div className="flex rounded-md overflow-hidden border border-slate-200">
+            {(['New Business', 'Renewal'] as DealType[]).map((opt, idx) => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => p.setDealType(opt)}
+                className={cn(
+                  'flex-1 px-3 py-2 text-[13px] font-semibold transition-colors',
+                  idx > 0 && 'border-l border-slate-200',
+                  p.dealType === opt ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                )}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+        </Field>
+
+        <Field label="Type of Insurance" required>
+          <select value={p.typeOfInsurance} onChange={e => p.setTypeOfInsurance(e.target.value)} className={inputClass}>
+            <option value="">Select Insurance Type</option>
+            {insuranceTypeOptions.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </Field>
+
+        <Field label="Product Type" required>
+          <select value={p.productType} onChange={e => p.setProductType(e.target.value as ProductType | '')} className={inputClass}>
+            <option value="">Select Product Type</option>
+            {PRODUCT_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </Field>
+
+        <Field label="Currency" required>
+          <select value={p.currency} onChange={e => p.setCurrency(e.target.value)} className={inputClass}>
+            {currencyOptions.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </Field>
+
+        <Field label={`Sum Insured (${p.currency})`}>
+          <input
+            type="text" value={p.sumInsured}
+            onChange={e => p.setSumInsured(formatNumber(e.target.value))}
+            className={inputClass} placeholder="1,000,000"
+          />
+        </Field>
+
+        <Field label={`Premium Amount (${p.currency})`}>
+          <input
+            type="text" value={p.premiumAmount}
+            onChange={e => p.setPremiumAmount(formatNumber(e.target.value))}
+            className={inputClass} placeholder="0"
+          />
+        </Field>
+
+        <Field label="Premium Type" required>
+          <select value={p.premiumType} onChange={e => p.setPremiumType(e.target.value)} className={inputClass}>
+            <option value="Estimated Premium">Estimated Premium</option>
+            <option value="Fixed Premium">Fixed Premium</option>
+          </select>
+        </Field>
+
+        <Field label="Insurance Company">
+          <select value={p.insuranceCompany} onChange={e => p.setInsuranceCompany(e.target.value)} className={inputClass}>
+            <option value="">Select Insurance Company</option>
+            {INSURANCE_COMPANIES.map(co => <option key={co} value={co}>{co}</option>)}
+            <option value="Other">Other</option>
+          </select>
+        </Field>
+
+        <Field label="Risk Location" className="md:col-span-2">
+          <textarea
+            value={p.riskLocation} onChange={e => p.setRiskLocation(e.target.value)} rows={2}
+            className={cn(inputClass, 'resize-none')} placeholder="Where the insured risk is located..."
+          />
+        </Field>
+
+        <Field label="Period Start">
+          <input type="date" value={p.periodStart} onChange={e => p.setPeriodStart(e.target.value)} className={inputClass} />
+        </Field>
+        <Field label="Period End">
+          <input type="date" value={p.periodEnd} onChange={e => p.setPeriodEnd(e.target.value)} className={inputClass} />
+        </Field>
+      </div>
+
+      <div className="pt-4 border-t border-slate-100">
+        <h4 className="text-[13px] font-semibold text-slate-800 mb-3">Person in Charge (PIC)</h4>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <Field label="PIC Name">
+            <input type="text" value={p.picName} onChange={e => p.setPicName(e.target.value)} className={inputClass} placeholder="Full name" />
+          </Field>
+          <Field label="PIC Email">
+            <input type="email" value={p.picEmail} onChange={e => p.setPicEmail(e.target.value)} className={inputClass} placeholder="pic@example.com" />
+          </Field>
+          <Field label="PIC Phone">
+            <input type="tel" value={p.picPhone} onChange={e => p.setPicPhone(e.target.value)} className={inputClass} placeholder="+62..." />
+          </Field>
+        </div>
+        <p className="mt-2 text-[11px] text-slate-500">Auto-filled from the master client PIC — you can override here for this deal.</p>
+      </div>
+    </div>
+  );
+};
+
+/* -------------------------------------------------------------------------- */
+/*                       Step 3: Status & Documents                           */
+/* -------------------------------------------------------------------------- */
+
+const DOC_FIELDS: { key: keyof DealDocuments; label: string; hint?: string }[] = [
+  { key: 'termsCondition',      label: 'Terms & Condition' },
+  { key: 'personalInformation', label: 'Personal Information', hint: 'KTP / NPWP' },
+  { key: 'surveyReport',        label: 'Survey Report' },
+  { key: 'existingPolicy',      label: 'Existing Policy' },
+  { key: 'otherDocument',       label: 'Other Document' },
+];
+
+const StepStatus: React.FC<{
+  statusStage: DealStage;
+  setStatusStage: (v: DealStage) => void;
+  statusStageOptions: DealStage[];
+  documents: DealDocuments;
+  setDocuments: (v: DealDocuments) => void;
+}> = ({ statusStage, setStatusStage, statusStageOptions, documents, setDocuments }) => {
+  const pickFile = (field: keyof DealDocuments) => {
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.onchange = (e: any) => {
+      const f = e.target.files?.[0];
+      if (f) setDocuments({ ...documents, [field]: f.name });
+    };
+    picker.click();
+  };
+
+  return (
+    <div className="bg-white rounded-lg p-6 border border-slate-200 max-w-3xl mx-auto space-y-6">
+      <SectionTitle index={3} color="purple" label="Status & Documents" subtitle="Set the pipeline stage and attach any supporting docs (all optional)." />
+
+      <Field label="Status Stage" required>
+        <select value={statusStage} onChange={e => setStatusStage(e.target.value as DealStage)} className={inputClass}>
+          {statusStageOptions.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+      </Field>
+
+      <div>
+        <div className="text-[13px] font-semibold text-slate-800 mb-2">Document Uploads</div>
+        <p className="text-[11px] text-slate-500 mb-3">Every document is optional — you can skip this step entirely.</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {DOC_FIELDS.map(({ key, label, hint }) => {
+            const value = documents[key];
+            return (
+              <div key={key} className="border border-slate-200 rounded-md px-3 py-2.5 bg-slate-50 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[12px] font-semibold text-slate-700">{label}</div>
+                  {hint && <div className="text-[11px] text-slate-500">{hint}</div>}
+                  {value && (
+                    <div className="text-[11px] text-blue-700 font-medium truncate mt-0.5 flex items-center gap-1">
+                      <FileText className="w-3 h-3 shrink-0" /> {value}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {value && (
+                    <button
+                      type="button"
+                      onClick={() => setDocuments({ ...documents, [key]: undefined })}
+                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                      title="Remove"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => pickFile(key)}
+                    className="px-2.5 py-1 text-[11px] font-semibold text-blue-600 border border-blue-200 hover:bg-blue-50 rounded transition-colors flex items-center gap-1"
+                  >
+                    <Upload className="w-3 h-3" /> {value ? 'Replace' : 'Upload'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <Field label="Additional Info" hint="Free-text notes that travel with the deal.">
+        <textarea
+          rows={3}
+          value={documents.additionalInfo || ''}
+          onChange={e => setDocuments({ ...documents, additionalInfo: e.target.value })}
+          className={cn(inputClass, 'resize-none')}
+          placeholder="Anything else underwriting / approvers should know..."
+        />
+      </Field>
+    </div>
+  );
+};
+
+/* -------------------------------------------------------------------------- */
+/*                           Step 4: Commission                               */
+/* -------------------------------------------------------------------------- */
+
+const StepCommission: React.FC<{
+  baseRate: string;            setBaseRate: (v: string) => void;
+  discountPercent: string;     setDiscountPercent: (v: string) => void;
+  efCommissionPercent: string; setEfCommissionPercent: (v: string) => void;
+  taxPercent: string;          setTaxPercent: (v: string) => void;
+  agentName: string;           setAgentName: (v: string) => void;
+  agentCashback: string;       setAgentCashback: (v: string) => void;
+  agentCashbackType: 'percent' | 'fixed'; setAgentCashbackType: (v: 'percent' | 'fixed') => void;
+  currency: string;
+}> = (p) => (
+  <div className="bg-white rounded-lg p-6 border border-slate-200 max-w-4xl mx-auto space-y-6">
+    <SectionTitle index={4} color="amber" label="Commission" subtitle="Set commission, agent and cashback details." />
+
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <Field label="Base Commission %" required>
+        <input type="number" min="0" max="100" step="0.01" value={p.baseRate} onChange={e => p.setBaseRate(e.target.value)} className={inputClass} placeholder="e.g. 15" />
+      </Field>
+
+      <Field
+        label="Discount to Client %"
+        hint={p.baseRate ? `Cannot exceed ${p.baseRate}%.` : undefined}
+      >
+        <input
+          type="number" min="0" max={p.baseRate || undefined} step="0.01"
+          value={p.discountPercent} onChange={e => p.setDiscountPercent(e.target.value)}
+          className={inputClass} placeholder="0"
+        />
+      </Field>
+
+      <Field label="EF Commission %" hint="Behind-the-table commission paid by insurer.">
+        <input type="number" min="0" max="100" step="0.01" value={p.efCommissionPercent} onChange={e => p.setEfCommissionPercent(e.target.value)} className={inputClass} placeholder="0" />
+      </Field>
+
+      <Field label="PPh 23 Tax %" hint={`Defaults to ${DEFAULT_TAX_PERCENT}.`}>
+        <input type="number" min="0" max="100" step="0.01" value={p.taxPercent} onChange={e => p.setTaxPercent(e.target.value)} className={inputClass} placeholder={`${DEFAULT_TAX_PERCENT}`} />
+      </Field>
+    </div>
+
+    <div className="pt-4 border-t border-slate-100">
+      <h4 className="text-[13px] font-semibold text-slate-800 mb-3">Sales Agent &amp; Cashback (Optional)</h4>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <Field label="Sales Agent Name">
+          <input type="text" value={p.agentName} onChange={e => p.setAgentName(e.target.value)} className={inputClass} placeholder="Agent name" />
+        </Field>
+
+        <Field
+          label={p.agentCashbackType === 'percent' ? 'Cashback %' : `Cashback Amount (${p.currency})`}
+          hint="Cashback paid to the sales agent."
+        >
+          <div className="flex gap-2">
+            <div className="flex rounded-md overflow-hidden border border-slate-200 shrink-0">
+              {(['percent', 'fixed'] as const).map((t, idx) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => p.setAgentCashbackType(t)}
+                  className={cn(
+                    'px-3 py-2 text-[12px] font-semibold transition-colors',
+                    idx > 0 && 'border-l border-slate-200',
+                    p.agentCashbackType === t ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                  )}
+                  title={t === 'percent' ? 'Percent of premium' : 'Fixed amount'}
+                >
+                  {t === 'percent' ? '%' : p.currency}
+                </button>
+              ))}
+            </div>
+            <input
+              type="text"
+              value={p.agentCashbackType === 'fixed' ? formatNumber(p.agentCashback) : p.agentCashback}
+              onChange={e => {
+                const v = e.target.value;
+                p.setAgentCashback(p.agentCashbackType === 'fixed' ? formatNumber(v) : v.replace(/[^\d.]/g, ''));
+              }}
+              className={inputClass}
+              placeholder="0"
+            />
+          </div>
+        </Field>
+      </div>
+    </div>
+  </div>
+);
+
+/* -------------------------------------------------------------------------- */
+/*                            Step 5: Preview                                 */
+/* -------------------------------------------------------------------------- */
+
+interface PreviewData {
+  clientAddress: string;
+  dealType: DealType;
+  typeOfInsurance: string;
+  productType: ProductType | '';
+  sumInsured: string;
+  currency: string;
+  premiumType: string;
+  premiumAmount: string;
+  riskLocation: string;
+  periodStart: string;
+  periodEnd: string;
+  picName: string;
+  picEmail: string;
+  picPhone: string;
+  insuranceCompany: string;
+  statusStage: DealStage;
+  documents: DealDocuments;
+  baseRate: string;
+  discountPercent: string;
+  efCommissionPercent: string;
+  taxPercent: string;
+  agentName: string;
+  agentCashback: string;
+  agentCashbackType: 'percent' | 'fixed';
+}
+
+const StepPreview: React.FC<{
+  client: ReturnType<typeof useData>['clients'][number] | null;
+  data: PreviewData;
+}> = ({ client, data }) => {
+  const docsFilled = Object.entries(data.documents).filter(([, v]) => v && String(v).trim() !== '');
+  return (
+    <div className="max-w-4xl mx-auto space-y-5">
+      <SectionTitle index={5} color="slate" label="Preview & Submit" subtitle="Final review. Submitting will send this deal for approval." />
+
+      <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800 flex gap-2">
+        <Send className="w-4 h-4 shrink-0 mt-0.5" />
+        <div>
+          <strong>Approval required.</strong> Once you submit, the deal status will move to
+          <span className="font-semibold"> Pending Approval</span> until a manager reviews it.
+        </div>
+      </div>
+
+      <PreviewBlock title="Client Information">
+        <PreviewRow label="Client" value={client?.companyName || '—'} />
+        <PreviewRow label="Address" value={data.clientAddress || '—'} multiline />
+      </PreviewBlock>
+
+      <PreviewBlock title="Insurance Coverage">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
+          <PreviewRow label="Deal Type" value={data.dealType} />
+          <PreviewRow label="Type of Insurance" value={data.typeOfInsurance} />
+          <PreviewRow label="Product Type" value={data.productType || '—'} />
+          <PreviewRow label="Insurance Company" value={data.insuranceCompany || '—'} />
+          <PreviewRow label="Sum Insured" value={data.sumInsured ? `${data.currency} ${data.sumInsured}` : '—'} />
+          <PreviewRow label="Premium" value={data.premiumAmount ? `${data.currency} ${data.premiumAmount} (${data.premiumType})` : '—'} />
+          <PreviewRow label="Period" value={data.periodStart && data.periodEnd ? `${data.periodStart} → ${data.periodEnd}` : '—'} />
+          <PreviewRow label="Risk Location" value={data.riskLocation || '—'} multiline />
+        </div>
+        <div className="mt-3 pt-3 border-t border-slate-100">
+          <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">PIC</div>
+          <div className="text-[13px] text-slate-700">
+            {data.picName || '—'} {data.picEmail && <span className="text-slate-400">• {data.picEmail}</span>}
+            {data.picPhone && <span className="text-slate-400"> • {data.picPhone}</span>}
+          </div>
+        </div>
+      </PreviewBlock>
+
+      <PreviewBlock title="Status & Documents">
+        <PreviewRow label="Status Stage" value={data.statusStage} />
+        <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mt-2 mb-1.5">Documents</div>
+        {docsFilled.length === 0 ? (
+          <p className="text-[12px] text-slate-400 italic">No documents attached.</p>
+        ) : (
+          <ul className="space-y-1">
+            {docsFilled.map(([k, v]) => (
+              <li key={k} className="text-[12px] text-slate-700 flex items-center gap-2">
+                <FileText className="w-3 h-3 text-slate-400" /> <span className="font-semibold">{DOC_LABEL[k as keyof DealDocuments] || k}:</span> {String(v)}
+              </li>
+            ))}
+          </ul>
+        )}
+      </PreviewBlock>
+
+      <PreviewBlock title="Commission">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Stat label="Base" value={`${data.baseRate || 0}%`} />
+          <Stat label="Discount" value={`${data.discountPercent || 0}%`} />
+          <Stat label="EF" value={`${data.efCommissionPercent || 0}%`} />
+          <Stat label="Tax (PPh 23)" value={`${data.taxPercent || DEFAULT_TAX_PERCENT}%`} />
+        </div>
+        {(data.agentName || data.agentCashback) && (
+          <div className="mt-3 pt-3 border-t border-slate-100 text-[13px] text-slate-700">
+            <span className="font-semibold">{data.agentName || 'Agent'}</span>
+            {data.agentCashback && (
+              <span className="text-slate-500 ml-2">
+                Cashback: {data.agentCashbackType === 'percent'
+                  ? `${data.agentCashback}%`
+                  : `${data.currency} ${data.agentCashback}`}
+              </span>
+            )}
+          </div>
+        )}
+      </PreviewBlock>
+    </div>
+  );
+};
+
+const DOC_LABEL: Record<keyof DealDocuments, string> = {
+  termsCondition: 'Terms & Condition',
+  personalInformation: 'Personal Information',
+  surveyReport: 'Survey Report',
+  existingPolicy: 'Existing Policy',
+  otherDocument: 'Other Document',
+  additionalInfo: 'Additional Info',
+};
+
+/* -------------------------------------------------------------------------- */
+/*                            Small render helpers                            */
+/* -------------------------------------------------------------------------- */
+
+const SectionTitle: React.FC<{
+  index: number;
+  color: 'blue' | 'emerald' | 'purple' | 'amber' | 'slate';
+  label: string;
+  subtitle?: string;
+}> = ({ index, color, label, subtitle }) => {
+  const colorMap: Record<typeof color, string> = {
+    blue:    'bg-blue-100 text-blue-700',
+    emerald: 'bg-emerald-100 text-emerald-700',
+    purple:  'bg-purple-100 text-purple-700',
+    amber:   'bg-amber-100 text-amber-700',
+    slate:   'bg-slate-200 text-slate-700',
+  };
+  return (
+    <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+      <div className={cn('w-7 h-7 rounded-md flex items-center justify-center text-[12px] font-bold', colorMap[color])}>
+        {index}
+      </div>
+      <div>
+        <h3 className="text-[14px] font-bold text-slate-900">{label}</h3>
+        {subtitle && <p className="text-[12px] text-slate-500">{subtitle}</p>}
+      </div>
+    </div>
+  );
+};
+
+const PreviewBlock: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+  <div className="bg-white rounded-lg border border-slate-200 p-5">
+    <div className="text-[12px] uppercase tracking-wider text-slate-500 font-bold mb-3">{title}</div>
+    {children}
+  </div>
+);
+
+const PreviewRow: React.FC<{ label: string; value: string; multiline?: boolean }> = ({ label, value, multiline }) => (
+  <div className={cn('py-1.5', multiline && 'col-span-full')}>
+    <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">{label}</div>
+    <div className="text-[13px] text-slate-800 whitespace-pre-wrap">{value || '—'}</div>
+  </div>
+);
+
+const Stat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+    <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">{label}</div>
+    <div className="text-[14px] font-bold text-slate-800">{value}</div>
+  </div>
+);
