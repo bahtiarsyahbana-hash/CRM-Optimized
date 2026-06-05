@@ -9,6 +9,8 @@ import {
   PRODUCT_TYPES,
   DealApprovalStatus,
   DealDocuments,
+  SOCCoverage,
+  SOCDetails,
 } from '../../types';
 import { defaultCommissionRate, DEFAULT_TAX_PERCENT } from '../../utils/commissionCalc';
 import {
@@ -24,6 +26,9 @@ import {
   Upload,
   FileText,
   Send,
+  Calculator,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { INSURANCE_COMPANIES } from '../../constants/insuranceCompanies';
@@ -33,7 +38,7 @@ import { cn } from '../../lib/utils';
 /*                             Wizard step config                             */
 /* -------------------------------------------------------------------------- */
 
-type StepKey = 'client' | 'coverage' | 'status' | 'commission' | 'preview';
+type StepKey = 'client' | 'coverage' | 'premium' | 'status' | 'commission' | 'preview';
 
 interface StepDef {
   key: StepKey;
@@ -43,11 +48,12 @@ interface StepDef {
 }
 
 const STEPS: StepDef[] = [
-  { key: 'client',     label: 'Client Information', hint: 'Pick the company',           icon: Building2     },
-  { key: 'coverage',   label: 'Insurance Coverage', hint: 'Risk & policy details',      icon: Shield        },
-  { key: 'status',     label: 'Status & Documents', hint: 'Stage and attachments',      icon: ClipboardList },
-  { key: 'commission', label: 'Commission',         hint: 'Rates, agent, cashback',     icon: Percent       },
-  { key: 'preview',    label: 'Preview & Submit',   hint: 'Review, send for approval',  icon: Eye           },
+  { key: 'client',     label: 'Client Information', hint: 'Pick the company',            icon: Building2     },
+  { key: 'coverage',   label: 'Insurance Coverage', hint: 'Risk & policy details',       icon: Shield        },
+  { key: 'premium',    label: 'Premium Calculation',hint: 'SOC-style coverage breakdown',icon: Calculator    },
+  { key: 'status',     label: 'Status & Documents', hint: 'Stage and attachments',       icon: ClipboardList },
+  { key: 'commission', label: 'Commission',         hint: 'Rates, agent, cashback',      icon: Percent       },
+  { key: 'preview',    label: 'Preview & Submit',   hint: 'Review, send for approval',   icon: Eye           },
 ];
 
 /* -------------------------------------------------------------------------- */
@@ -64,6 +70,54 @@ const formatNumber = (value: string) => {
 
 const parseNum = (v: string): number | undefined =>
   v && v.trim() !== '' ? parseFloat(v.replace(/,/g, '')) : undefined;
+
+type SOCTemplate = 'General' | 'Motor Vehicle' | 'Other';
+
+const newId = () =>
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
+
+const SOC_TEMPLATES: Record<SOCTemplate, Omit<SOCCoverage, 'id' | 'amount'>[]> = {
+  General: [
+    { name: 'FLEXAS (KEBAKARAN)',         rate: '0.0294',  rateType: 'percentage' },
+    { name: 'FWTWD (BANJIR)',             rate: '0.05',    rateType: 'percentage' },
+    { name: 'RSMDCC (HURU-HARA)',         rate: '0.00001', rateType: 'percentage' },
+    { name: 'OTHERS (LAIN-LAIN)',         rate: '0.00001', rateType: 'percentage' },
+    { name: 'EARTHQUAKE (GEMPA BUMI)',    rate: '0',       rateType: 'percentage' },
+    { name: 'MACHINERY BREAKDOWN',        rate: '0',       rateType: 'percentage' },
+    { name: 'PUBLIC LIABILITY',           rate: '0',       rateType: 'percentage' },
+    { name: 'BUSINESS INTERUPTION',       rate: '0',       rateType: 'percentage' },
+  ],
+  'Motor Vehicle': [
+    { name: 'Comprehensive',                                  rate: '1.2',     rateType: 'percentage' },
+    { name: 'LOADING RATE',                                   rate: '0',       rateType: 'percentage' },
+    { name: 'FWTWD',                                          rate: '0.10',    rateType: 'percentage' },
+    { name: 'SRCC',                                           rate: '0.05',    rateType: 'percentage' },
+    { name: 'TERRORISM SABOTAGE',                             rate: '0',       rateType: 'percentage' },
+    { name: 'PERSONAL ACCIDENT DRIVER : 10,000,000',          rate: '50000',   rateType: 'fixed' },
+    { name: 'PERSONAL ACCIDENT PASSENGER : 10,000,000',       rate: '40000',   rateType: 'fixed' },
+    { name: 'THIRD PARTY LIABILITY : 50,000,000',             rate: '375000',  rateType: 'fixed' },
+    { name: 'THEFT BY OWN DRIVER',                            rate: '0.01',    rateType: 'percentage' },
+    { name: 'AUTHORIZED GARAGE',                              rate: '0.01',    rateType: 'percentage' },
+  ],
+  Other: [{ name: 'Main Coverage', rate: '0', rateType: 'fixed' }],
+};
+
+const buildTemplateCoverages = (t: SOCTemplate): SOCCoverage[] =>
+  SOC_TEMPLATES[t].map(c => ({ ...c, id: newId(), amount: 0 }));
+
+const calcCoverageAmount = (cov: SOCCoverage, sumInsured: number): number => {
+  const rate = parseFloat(cov.rate || '0');
+  if (isNaN(rate)) return 0;
+  return cov.rateType === 'percentage' ? (rate / 100) * sumInsured : rate;
+};
+
+const guessTemplateFromInsuranceType = (insuranceType: string): SOCTemplate => {
+  const t = insuranceType.toLowerCase();
+  if (t.includes('motor') || t.includes('kendaraan') || t.includes('vehicle')) return 'Motor Vehicle';
+  return 'General';
+};
 
 /* -------------------------------------------------------------------------- */
 /*                                Main wizard                                 */
@@ -129,7 +183,49 @@ export const DealDetailForm = ({
   const [picPhone, setPicPhone] = useState(deal?.picPhone || '');
   const [insuranceCompany, setInsuranceCompany] = useState(deal?.insuranceCompany || '');
 
-  /* ----- Step 3: Status & Documents ----- */
+  /* ----- Step 3: Premium calculation (SOC-style) ----- */
+  const [socTemplate, setSocTemplate] = useState<SOCTemplate>(
+    (deal?.socDetails?.templateType as SOCTemplate)
+      || guessTemplateFromInsuranceType(deal?.typeOfInsurance || '')
+  );
+  const [socCoverages, setSocCoverages] = useState<SOCCoverage[]>(
+    deal?.socDetails?.coverages?.length
+      ? deal.socDetails.coverages
+      : buildTemplateCoverages(
+          (deal?.socDetails?.templateType as SOCTemplate)
+            || guessTemplateFromInsuranceType(deal?.typeOfInsurance || '')
+        )
+  );
+  const [socDiscountPercent, setSocDiscountPercent] = useState<number>(deal?.socDetails?.discountPercent ?? 0);
+  const [socAdminFee, setSocAdminFee] = useState<number>(deal?.socDetails?.adminFee ?? 67000);
+  const [socPolicyFee, setSocPolicyFee] = useState<number>(deal?.socDetails?.policyFee ?? 0);
+  const [socDeductible, setSocDeductible] = useState<string>(deal?.socDetails?.deductible ?? '');
+  // When true, the calculator drives premiumAmount and the manual field in step 2 is locked.
+  const [premiumFromSoc, setPremiumFromSoc] = useState<boolean>(!!deal?.socDetails?.totalPremium);
+
+  const currentSumInsuredNumber = useMemo(() => parseNum(sumInsured) ?? 0, [sumInsured]);
+
+  const derivedSocCoverages: SOCCoverage[] = useMemo(
+    () => socCoverages.map(c => ({ ...c, amount: calcCoverageAmount(c, currentSumInsuredNumber) })),
+    [socCoverages, currentSumInsuredNumber]
+  );
+
+  const socSubTotal = useMemo(
+    () => derivedSocCoverages.reduce((acc, c) => acc + c.amount, 0),
+    [derivedSocCoverages]
+  );
+  const socDiscountAmount = (socSubTotal * socDiscountPercent) / 100;
+  const socTotalPremium = socSubTotal - socDiscountAmount + socAdminFee + socPolicyFee;
+
+  // When the SOC drives premium, mirror the total into the premium input.
+  useEffect(() => {
+    if (premiumFromSoc) {
+      setPremiumAmount(formatNumber(socTotalPremium.toFixed(0)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [premiumFromSoc, socTotalPremium]);
+
+  /* ----- Step 4: Status & Documents ----- */
   const [statusStage, setStatusStage] = useState<DealStage>(deal?.statusStage || 'Leads');
   const [documents, setDocuments] = useState<DealDocuments>(deal?.documents || {});
 
@@ -146,7 +242,7 @@ export const DealDetailForm = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dealType]);
 
-  /* ----- Step 4: Commission ----- */
+  /* ----- Step 5: Commission ----- */
   const [baseRate, setBaseRate] = useState<string>(
     deal?.commission?.baseRate != null ? String(deal.commission.baseRate) : ''
   );
@@ -196,6 +292,7 @@ export const DealDetailForm = ({
       !premiumType ? 'Premium Type is required.' : null,
       !insuranceCompany ? 'Insurance Company is required.' : null,
     ].filter(Boolean) as string[],
+    premium: [],
     status: !statusStage ? ['Status Stage is required.'] : [],
     commission: [
       baseRate === '' ? 'Base Commission % is required.' : null,
@@ -235,6 +332,33 @@ export const DealDetailForm = ({
   };
 
   /* ----- Final submit ----- */
+  const buildSocDetails = (): SOCDetails | undefined => {
+    const hasMeaningfulData =
+      premiumFromSoc
+      || socTotalPremium > 0
+      || socCoverages.some(c => parseFloat(c.rate || '0') > 0)
+      || socDiscountPercent !== 0
+      || socAdminFee !== 0
+      || socPolicyFee !== 0
+      || (socDeductible && socDeductible.trim() !== '');
+    if (!hasMeaningfulData) return undefined;
+
+    return {
+      templateType: socTemplate,
+      coverages: derivedSocCoverages,
+      subTotal: socSubTotal,
+      discountPercent: socDiscountPercent,
+      adminFee: socAdminFee,
+      policyFee: socPolicyFee,
+      deductible: socDeductible || undefined,
+      totalPremium: socTotalPremium,
+      // Preserve existing meta if any (set later in SOCManagerModal when issuing the PDF).
+      attentionTo: deal?.socDetails?.attentionTo,
+      socDate: deal?.socDetails?.socDate,
+      socNumber: deal?.socDetails?.socNumber,
+    };
+  };
+
   const buildPayload = (approval: DealApprovalStatus): Omit<Deal, 'id' | 'createdAt' | 'updatedAt'> => ({
     clientId,
     clientAddress: clientAddress || undefined,
@@ -244,7 +368,8 @@ export const DealDetailForm = ({
     sumInsured: parseNum(sumInsured),
     currency,
     premiumType,
-    premiumAmount: parseNum(premiumAmount),
+    premiumAmount: premiumFromSoc ? socTotalPremium : parseNum(premiumAmount),
+    socDetails: buildSocDetails(),
     insuranceCompany: insuranceCompany || undefined,
     periodStart: periodStart ? new Date(periodStart).toISOString() : undefined,
     periodEnd: periodEnd ? new Date(periodEnd).toISOString() : undefined,
@@ -398,6 +523,7 @@ export const DealDetailForm = ({
                 currency, setCurrency,
                 premiumType, setPremiumType,
                 premiumAmount, setPremiumAmount,
+                premiumLocked: premiumFromSoc,
                 riskLocation, setRiskLocation,
                 periodStart, setPeriodStart,
                 periodEnd, setPeriodEnd,
@@ -406,6 +532,32 @@ export const DealDetailForm = ({
                 picPhone, setPicPhone,
                 insuranceCompany, setInsuranceCompany,
               }}
+            />
+          )}
+          {currentStep.key === 'premium' && (
+            <StepPremium
+              currency={currency}
+              sumInsuredNumber={currentSumInsuredNumber}
+              template={socTemplate}
+              setTemplate={(t) => {
+                setSocTemplate(t);
+                setSocCoverages(buildTemplateCoverages(t));
+              }}
+              coverages={derivedSocCoverages}
+              setCoverages={setSocCoverages}
+              discountPercent={socDiscountPercent}
+              setDiscountPercent={setSocDiscountPercent}
+              adminFee={socAdminFee}
+              setAdminFee={setSocAdminFee}
+              policyFee={socPolicyFee}
+              setPolicyFee={setSocPolicyFee}
+              deductible={socDeductible}
+              setDeductible={setSocDeductible}
+              subTotal={socSubTotal}
+              discountAmount={socDiscountAmount}
+              totalPremium={socTotalPremium}
+              premiumFromSoc={premiumFromSoc}
+              setPremiumFromSoc={setPremiumFromSoc}
             />
           )}
           {currentStep.key === 'status' && (
@@ -440,6 +592,15 @@ export const DealDetailForm = ({
                 picName, picEmail, picPhone, insuranceCompany, statusStage, documents,
                 baseRate, discountPercent, efCommissionPercent, taxPercent,
                 agentName, agentCashback, agentCashbackType,
+                socTemplate,
+                socCoverages: derivedSocCoverages,
+                socDiscountPercent,
+                socAdminFee,
+                socPolicyFee,
+                socDeductible,
+                socSubTotal,
+                socTotalPremium,
+                premiumFromSoc,
               }}
             />
           )}
@@ -593,6 +754,8 @@ interface StepCoverageProps {
   currency: string;                                   setCurrency: (v: string) => void;
   premiumType: string;                                setPremiumType: (v: string) => void;
   premiumAmount: string;                              setPremiumAmount: (v: string) => void;
+  /** When true, the premium amount field is locked because the SOC calculator drives it. */
+  premiumLocked?: boolean;
   riskLocation: string;                               setRiskLocation: (v: string) => void;
   periodStart: string;                                setPeriodStart: (v: string) => void;
   periodEnd: string;                                  setPeriodEnd: (v: string) => void;
@@ -664,11 +827,16 @@ const StepCoverage: React.FC<StepCoverageProps> = (p) => {
           />
         </Field>
 
-        <Field label={`Premium Amount (${p.currency})`}>
+        <Field
+          label={`Premium Amount (${p.currency})`}
+          hint={p.premiumLocked ? 'Driven by the SOC calculator in step 3 — edit there to change.' : undefined}
+        >
           <input
             type="text" value={p.premiumAmount}
             onChange={e => p.setPremiumAmount(formatNumber(e.target.value))}
-            className={inputClass} placeholder="0"
+            disabled={p.premiumLocked}
+            className={cn(inputClass, p.premiumLocked && 'bg-slate-50 text-slate-500 cursor-not-allowed')}
+            placeholder="0"
           />
         </Field>
 
@@ -722,7 +890,228 @@ const StepCoverage: React.FC<StepCoverageProps> = (p) => {
 };
 
 /* -------------------------------------------------------------------------- */
-/*                       Step 3: Status & Documents                           */
+/*                      Step 3: Premium Calculation (SOC)                     */
+/* -------------------------------------------------------------------------- */
+
+interface StepPremiumProps {
+  currency: string;
+  sumInsuredNumber: number;
+  template: SOCTemplate;
+  setTemplate: (t: SOCTemplate) => void;
+  coverages: SOCCoverage[]; // already derived (amount computed)
+  setCoverages: React.Dispatch<React.SetStateAction<SOCCoverage[]>>;
+  discountPercent: number;
+  setDiscountPercent: (v: number) => void;
+  adminFee: number;
+  setAdminFee: (v: number) => void;
+  policyFee: number;
+  setPolicyFee: (v: number) => void;
+  deductible: string;
+  setDeductible: (v: string) => void;
+  subTotal: number;
+  discountAmount: number;
+  totalPremium: number;
+  premiumFromSoc: boolean;
+  setPremiumFromSoc: (v: boolean) => void;
+}
+
+const fmtAmount = (n: number) =>
+  n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const StepPremium: React.FC<StepPremiumProps> = (p) => {
+  const update = (id: string, field: keyof SOCCoverage, value: any) => {
+    p.setCoverages(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
+  };
+  const remove = (id: string) => p.setCoverages(prev => prev.filter(c => c.id !== id));
+  const addRow = () => p.setCoverages(prev => [
+    ...prev,
+    { id: newId(), name: '', rate: '0', rateType: 'percentage', amount: 0 },
+  ]);
+
+  return (
+    <div className="bg-white rounded-lg p-6 border border-slate-200 max-w-5xl mx-auto space-y-5">
+      <SectionTitle
+        index={3}
+        color="purple"
+        label="Premium Calculation"
+        subtitle="Build the premium with the same SOC coverage structure used on the final document."
+      />
+
+      {p.sumInsuredNumber === 0 && (
+        <div className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+          Sum Insured is 0 — percentage-rated coverages will calculate to 0. Set Sum Insured in step 2 first.
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Field label="SOC Template" className="md:col-span-1">
+          <select
+            value={p.template}
+            onChange={e => p.setTemplate(e.target.value as SOCTemplate)}
+            className={inputClass}
+          >
+            <option value="General">General Insurance</option>
+            <option value="Motor Vehicle">Motor Vehicle</option>
+            <option value="Other">Other / Custom</option>
+          </select>
+        </Field>
+        <Field label="Deductible" className="md:col-span-2">
+          <input
+            type="text"
+            value={p.deductible}
+            onChange={e => p.setDeductible(e.target.value)}
+            className={inputClass}
+            placeholder="e.g. As per policy"
+          />
+        </Field>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 overflow-hidden text-[13px]">
+        <table className="w-full text-left">
+          <thead className="bg-slate-900 text-white">
+            <tr>
+              <th className="px-3 py-2 font-semibold w-10 text-center">NO.</th>
+              <th className="px-3 py-2 font-semibold">COVERAGE</th>
+              <th className="px-3 py-2 font-semibold w-56">RATE</th>
+              <th className="px-3 py-2 font-semibold text-right w-40">AMOUNT ({p.currency})</th>
+              <th className="px-2 py-2 font-semibold w-10"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {p.coverages.map((cov, i) => (
+              <tr key={cov.id} className="hover:bg-slate-50">
+                <td className="px-3 py-2 text-center text-slate-500">{i + 1}</td>
+                <td className="px-3 py-2">
+                  <input
+                    type="text"
+                    value={cov.name}
+                    onChange={e => update(cov.id, 'name', e.target.value)}
+                    className="w-full bg-transparent border-none focus:ring-0 p-0 text-[12px] font-medium text-slate-800 uppercase"
+                    placeholder="Coverage Name"
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={cov.rate}
+                      onChange={e => update(cov.id, 'rate', e.target.value)}
+                      className="w-20 px-1 py-1 bg-white border border-slate-200 rounded text-[12px] focus:outline-none focus:border-blue-500 text-right font-mono"
+                    />
+                    <select
+                      value={cov.rateType}
+                      onChange={e => update(cov.id, 'rateType', e.target.value as 'percentage' | 'fixed')}
+                      className="bg-transparent border-none text-[11px] text-slate-500 focus:ring-0 cursor-pointer p-0"
+                    >
+                      <option value="percentage">%</option>
+                      <option value="fixed">Fixed</option>
+                    </select>
+                  </div>
+                </td>
+                <td className="px-3 py-2 text-right font-mono font-medium text-slate-800 text-[12px]">
+                  {fmtAmount(cov.amount)}
+                </td>
+                <td className="px-2 py-2 text-center">
+                  <button
+                    type="button"
+                    onClick={() => remove(cov.id)}
+                    className="text-slate-400 hover:text-red-500 transition-colors"
+                    title="Remove"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+            <tr>
+              <td colSpan={5} className="px-4 py-2.5 bg-slate-50">
+                <button
+                  type="button"
+                  onClick={addRow}
+                  className="flex items-center gap-1.5 text-[12px] font-semibold text-blue-600 hover:text-blue-700"
+                >
+                  <Plus className="w-4 h-4" /> Add Coverage
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        {/* Totals */}
+        <div className="bg-slate-100/50 p-5 border-t border-slate-200 grid grid-cols-2 gap-4">
+          <div className="space-y-3 col-start-2">
+            <div className="flex items-center justify-between text-[13px]">
+              <span className="text-slate-600 font-medium">Sub Total:</span>
+              <span className="font-mono text-slate-800">{fmtAmount(p.subTotal)}</span>
+            </div>
+            <div className="flex items-center justify-between text-emerald-600 text-[13px]">
+              <span className="font-medium">Discount (%):</span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  value={p.discountPercent}
+                  onChange={e => p.setDiscountPercent(parseFloat(e.target.value) || 0)}
+                  className="w-16 px-2 py-1 bg-white border border-slate-200 rounded text-[12px] text-right focus:outline-none focus:border-blue-500"
+                />
+                <span className="font-mono">-{fmtAmount(p.discountAmount)}</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-slate-600 text-[13px]">
+              <span className="font-medium">Admin Cost:</span>
+              <input
+                type="number"
+                value={p.adminFee}
+                onChange={e => p.setAdminFee(parseFloat(e.target.value) || 0)}
+                className="w-28 px-2 py-1 bg-white border border-slate-200 rounded text-[12px] text-right font-mono focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div className="flex items-center justify-between text-slate-600 text-[13px]">
+              <span className="font-medium">Policy Fee:</span>
+              <input
+                type="number"
+                value={p.policyFee}
+                onChange={e => p.setPolicyFee(parseFloat(e.target.value) || 0)}
+                className="w-28 px-2 py-1 bg-white border border-slate-200 rounded text-[12px] text-right font-mono focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div className="pt-3 border-t border-slate-300 flex items-center justify-between mt-2">
+              <span className="text-[14px] font-bold text-slate-900">Total Premium:</span>
+              <span className="text-[15px] font-bold font-mono text-slate-900">
+                {p.currency} {fmtAmount(p.totalPremium)}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <label className={cn(
+        'flex items-start gap-3 rounded-md border px-3 py-2.5 cursor-pointer transition-colors',
+        p.premiumFromSoc
+          ? 'bg-blue-50 border-blue-200'
+          : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+      )}>
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={p.premiumFromSoc}
+          onChange={e => p.setPremiumFromSoc(e.target.checked)}
+        />
+        <div>
+          <div className="text-[13px] font-semibold text-slate-800">
+            Use this total as the deal's Premium Amount
+          </div>
+          <div className="text-[12px] text-slate-500">
+            When on, the Premium Amount in step 2 is locked and follows this total automatically.
+            Turn off if you'd rather enter premium manually and treat the SOC as reference only.
+          </div>
+        </div>
+      </label>
+    </div>
+  );
+};
+
+/* -------------------------------------------------------------------------- */
+/*                       Step 4: Status & Documents                           */
 /* -------------------------------------------------------------------------- */
 
 const DOC_FIELDS: { key: keyof DealDocuments; label: string; hint?: string }[] = [
@@ -752,7 +1141,7 @@ const StepStatus: React.FC<{
 
   return (
     <div className="bg-white rounded-lg p-6 border border-slate-200 max-w-3xl mx-auto space-y-6">
-      <SectionTitle index={3} color="purple" label="Status & Documents" subtitle="Set the pipeline stage and attach any supporting docs (all optional)." />
+      <SectionTitle index={4} color="rose" label="Status & Documents" subtitle="Set the pipeline stage and attach any supporting docs (all optional)." />
 
       <Field label="Status Stage" required>
         <select value={statusStage} onChange={e => setStatusStage(e.target.value as DealStage)} className={inputClass}>
@@ -830,7 +1219,7 @@ const StepCommission: React.FC<{
   currency: string;
 }> = (p) => (
   <div className="bg-white rounded-lg p-6 border border-slate-200 max-w-4xl mx-auto space-y-6">
-    <SectionTitle index={4} color="amber" label="Commission" subtitle="Set commission, agent and cashback details." />
+    <SectionTitle index={5} color="amber" label="Commission" subtitle="Set commission, agent and cashback details." />
 
     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
       <Field label="Base Commission %" required>
@@ -932,6 +1321,15 @@ interface PreviewData {
   agentName: string;
   agentCashback: string;
   agentCashbackType: 'percent' | 'fixed';
+  socTemplate: SOCTemplate;
+  socCoverages: SOCCoverage[];
+  socDiscountPercent: number;
+  socAdminFee: number;
+  socPolicyFee: number;
+  socDeductible: string;
+  socSubTotal: number;
+  socTotalPremium: number;
+  premiumFromSoc: boolean;
 }
 
 const StepPreview: React.FC<{
@@ -941,7 +1339,7 @@ const StepPreview: React.FC<{
   const docsFilled = Object.entries(data.documents).filter(([, v]) => v && String(v).trim() !== '');
   return (
     <div className="max-w-4xl mx-auto space-y-5">
-      <SectionTitle index={5} color="slate" label="Preview & Submit" subtitle="Final review. Submitting will send this deal for approval." />
+      <SectionTitle index={6} color="slate" label="Preview & Submit" subtitle="Final review. Submitting will send this deal for approval." />
 
       <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800 flex gap-2">
         <Send className="w-4 h-4 shrink-0 mt-0.5" />
@@ -973,6 +1371,49 @@ const StepPreview: React.FC<{
             {data.picName || '—'} {data.picEmail && <span className="text-slate-400">• {data.picEmail}</span>}
             {data.picPhone && <span className="text-slate-400"> • {data.picPhone}</span>}
           </div>
+        </div>
+      </PreviewBlock>
+
+      <PreviewBlock title="Premium Calculation (SOC)">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+          <Stat label="Template" value={data.socTemplate} />
+          <Stat label="Sub Total" value={`${data.currency} ${fmtAmount(data.socSubTotal)}`} />
+          <Stat label="Discount" value={`${data.socDiscountPercent || 0}%`} />
+          <Stat label="Total Premium" value={`${data.currency} ${fmtAmount(data.socTotalPremium)}`} />
+        </div>
+        {data.socCoverages.length > 0 && data.socTotalPremium > 0 ? (
+          <div className="overflow-hidden rounded-md border border-slate-200">
+            <table className="w-full text-[12px]">
+              <thead className="bg-slate-50 text-slate-600">
+                <tr>
+                  <th className="px-3 py-1.5 text-left font-semibold">Coverage</th>
+                  <th className="px-3 py-1.5 text-right font-semibold w-24">Rate</th>
+                  <th className="px-3 py-1.5 text-right font-semibold w-32">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {data.socCoverages
+                  .filter(c => c.amount > 0 || c.name.trim() !== '')
+                  .map(c => (
+                    <tr key={c.id}>
+                      <td className="px-3 py-1.5 text-slate-700">{c.name || '—'}</td>
+                      <td className="px-3 py-1.5 text-right font-mono text-slate-600">
+                        {c.rate}{c.rateType === 'percentage' ? '%' : ''}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono text-slate-800">{fmtAmount(c.amount)}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-[12px] text-slate-400 italic">No SOC coverages entered.</p>
+        )}
+        <div className="mt-2 text-[11px] text-slate-500">
+          {data.premiumFromSoc
+            ? 'This total drives the deal\'s Premium Amount.'
+            : 'SOC stored as reference only — Premium Amount was entered manually.'}
+          {data.socDeductible && <> · Deductible: <span className="text-slate-700">{data.socDeductible}</span></>}
         </div>
       </PreviewBlock>
 
@@ -1031,7 +1472,7 @@ const DOC_LABEL: Record<keyof DealDocuments, string> = {
 
 const SectionTitle: React.FC<{
   index: number;
-  color: 'blue' | 'emerald' | 'purple' | 'amber' | 'slate';
+  color: 'blue' | 'emerald' | 'purple' | 'amber' | 'slate' | 'rose';
   label: string;
   subtitle?: string;
 }> = ({ index, color, label, subtitle }) => {
@@ -1041,6 +1482,7 @@ const SectionTitle: React.FC<{
     purple:  'bg-purple-100 text-purple-700',
     amber:   'bg-amber-100 text-amber-700',
     slate:   'bg-slate-200 text-slate-700',
+    rose:    'bg-rose-100 text-rose-700',
   };
   return (
     <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
