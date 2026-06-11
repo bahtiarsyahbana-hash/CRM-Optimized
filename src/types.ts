@@ -111,16 +111,37 @@ export interface DealDocuments {
 
 export type PaymentStatus = 'Unpaid' | 'Paid';
 
+/**
+ * One product on a multi-product deal. Each line carries its own product
+ * name, sum insured, premium and (critically) its own cover note number /
+ * uploaded policy file. Everything else (period, insurer, PIC, invoice,
+ * approval, commission, SOC) stays at the deal level.
+ */
+export interface PolicyLine {
+  id: string;
+  productName: string;          // e.g. "Property All Risk", "Earthquake", "Machinery Breakdown"
+  sumInsured?: number;
+  premiumAmount?: number;
+  coverNoteNumber?: string;
+  originalPolicyFile?: string;
+}
+
 export interface Deal {
   id: string;
   clientId: string;
   /** Deal-level client address. Defaults to the client's companyAddress at create time but can be edited. */
   clientAddress?: string;
   dealType: DealType;
+  /** When `lines` has multiple entries this is a comma-joined summary;
+   *  for single-product deals it is the only product name. */
   typeOfInsurance: string;
   productType?: ProductType;
   sumInsured?: number;
   sumInsuredBreakdown?: { assetName: string; amount: number }[];
+  /** Optional multi-product breakdown. When present, the deal totals
+   *  (sumInsured, premiumAmount, typeOfInsurance) are derived from the lines
+   *  on save, but the top-level fields are still written so older views work. */
+  lines?: PolicyLine[];
   currency: string;
   premiumType: string;
   premiumAmount?: number;

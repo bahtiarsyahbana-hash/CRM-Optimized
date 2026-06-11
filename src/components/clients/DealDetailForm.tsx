@@ -11,6 +11,7 @@ import {
   DealDocuments,
   SOCCoverage,
   SOCDetails,
+  PolicyLine,
 } from '../../types';
 import { defaultCommissionRate, DEFAULT_TAX_PERCENT } from '../../utils/commissionCalc';
 import {
@@ -184,6 +185,75 @@ export const DealDetailForm = ({
   const [picPhone, setPicPhone] = useState(deal?.picPhone || '');
   const [insuranceCompany, setInsuranceCompany] = useState(deal?.insuranceCompany || '');
 
+  /* ----- Step 2: Multi-product support -----
+   *
+   *  - When the deal has 0/1 products, we work with the single-product fields
+   *    above and `extraLines` stays empty.
+   *  - When the user adds a second product, the single-product fields become
+   *    "Product 1" and each entry in `extraLines` is Product 2+, with its own
+   *    cover note number. Sum Insured / Premium Amount on the deal become
+   *    the sum across all lines.
+   *
+   *  Cover note is the only field intentionally NOT shared — the user wants
+   *  to issue a separate cover note per product.
+   */
+  type LineDraft = {
+    id: string;
+    productName: string;
+    sumInsured: string;       // formatted
+    premiumAmount: string;    // formatted
+    coverNoteNumber: string;
+  };
+
+  const initialExtraLines: LineDraft[] = (() => {
+    const stored = deal?.lines || [];
+    if (stored.length <= 1) return [];
+    // The first stored line populates the single-product fields; the rest
+    // become "extra lines".
+    return stored.slice(1).map(l => ({
+      id: l.id,
+      productName: l.productName,
+      sumInsured: l.sumInsured != null ? formatNumber(String(l.sumInsured)) : '',
+      premiumAmount: l.premiumAmount != null ? formatNumber(String(l.premiumAmount)) : '',
+      coverNoteNumber: l.coverNoteNumber || '',
+    }));
+  })();
+
+  const [extraLines, setExtraLines] = useState<LineDraft[]>(initialExtraLines);
+  const [primaryCoverNoteNumber, setPrimaryCoverNoteNumber] = useState<string>(() => {
+    const stored = deal?.lines || [];
+    if (stored.length > 1) return stored[0].coverNoteNumber || '';
+    return deal?.coverNoteNumber || '';
+  });
+
+  const isMultiProductMode = extraLines.length > 0;
+
+  const addProductLine = () => {
+    setExtraLines(prev => [
+      ...prev,
+      { id: newId(), productName: '', sumInsured: '', premiumAmount: '', coverNoteNumber: '' },
+    ]);
+  };
+  const removeProductLine = (id: string) => {
+    setExtraLines(prev => prev.filter(l => l.id !== id));
+  };
+  const updateProductLine = (id: string, patch: Partial<LineDraft>) => {
+    setExtraLines(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
+  };
+
+  // Derived totals — used by the SOC step (sumInsuredNumber) and the preview.
+  const allLineSumInsured = useMemo(() => {
+    const primary = parseNum(sumInsured) ?? 0;
+    const extras = extraLines.reduce((acc, l) => acc + (parseNum(l.sumInsured) ?? 0), 0);
+    return primary + extras;
+  }, [sumInsured, extraLines]);
+
+  const allLinePremium = useMemo(() => {
+    const primary = parseNum(premiumAmount) ?? 0;
+    const extras = extraLines.reduce((acc, l) => acc + (parseNum(l.premiumAmount) ?? 0), 0);
+    return primary + extras;
+  }, [premiumAmount, extraLines]);
+
   /* ----- Step 3: Premium calculation (SOC-style) ----- */
   const [socTemplate, setSocTemplate] = useState<SOCTemplate>(
     (deal?.socDetails?.templateType as SOCTemplate)
@@ -204,7 +274,8 @@ export const DealDetailForm = ({
   // When true, the calculator drives premiumAmount and the manual field in step 2 is locked.
   const [premiumFromSoc, setPremiumFromSoc] = useState<boolean>(!!deal?.socDetails?.totalPremium);
 
-  const currentSumInsuredNumber = useMemo(() => parseNum(sumInsured) ?? 0, [sumInsured]);
+  // Use the multi-line total so SOC % rates apply across all products.
+  const currentSumInsuredNumber = allLineSumInsured;
 
   const derivedSocCoverages: SOCCoverage[] = useMemo(
     () => socCoverages.map(c => ({ ...c, amount: calcCoverageAmount(c, currentSumInsuredNumber) })),
@@ -360,16 +431,53 @@ export const DealDetailForm = ({
     };
   };
 
-  const buildPayload = (approval: DealApprovalStatus): Omit<Deal, 'id' | 'createdAt' | 'updatedAt'> => ({
+  const buildPayload = (approval: DealApprovalStatus): Omit<Deal, 'id' | 'createdAt' | 'updatedAt'> => {
+    // Build line array. Only persist `lines` when the user has chosen
+    // multi-product mode; otherwise legacy top-level fields are the source
+    // of truth and `lines` stays undefined for backward compat.
+    const lines: PolicyLine[] | undefined = isMultiProductMode
+      ? [
+          {
+            id: deal?.lines?.[0]?.id || `${deal?.id || 'primary'}_p0`,
+            productName: typeOfInsurance,
+            sumInsured: parseNum(sumInsured),
+            premiumAmount: parseNum(premiumAmount),
+            coverNoteNumber: primaryCoverNoteNumber || undefined,
+            originalPolicyFile: deal?.lines?.[0]?.originalPolicyFile,
+          },
+          ...extraLines.map((l, i): PolicyLine => ({
+            id: l.id,
+            productName: l.productName,
+            sumInsured: parseNum(l.sumInsured),
+            premiumAmount: parseNum(l.premiumAmount),
+            coverNoteNumber: l.coverNoteNumber || undefined,
+            originalPolicyFile: deal?.lines?.[i + 1]?.originalPolicyFile,
+          })),
+        ]
+      : undefined;
+
+    // When in multi-product mode the rolled-up totals become the canonical
+    // values for any single-field consumers (claim screens, reporting…).
+    const rollupSumInsured = isMultiProductMode ? allLineSumInsured : parseNum(sumInsured);
+    const rollupPremium = premiumFromSoc
+      ? socTotalPremium
+      : isMultiProductMode ? allLinePremium : parseNum(premiumAmount);
+    const rollupTypeOfInsurance = isMultiProductMode
+      ? [typeOfInsurance, ...extraLines.map(l => l.productName)].filter(Boolean).join(' + ')
+      : typeOfInsurance;
+
+    return {
     clientId,
     clientAddress: clientAddress || undefined,
     dealType,
-    typeOfInsurance,
+    typeOfInsurance: rollupTypeOfInsurance,
     productType: (productType || undefined) as ProductType | undefined,
-    sumInsured: parseNum(sumInsured),
+    sumInsured: rollupSumInsured,
+    lines,
     currency,
     premiumType,
-    premiumAmount: premiumFromSoc ? socTotalPremium : parseNum(premiumAmount),
+    premiumAmount: rollupPremium,
+    coverNoteNumber: isMultiProductMode ? undefined : (primaryCoverNoteNumber || deal?.coverNoteNumber),
     socDetails: buildSocDetails(),
     insuranceCompany: insuranceCompany || undefined,
     periodStart: periodStart ? new Date(periodStart).toISOString() : undefined,
@@ -394,7 +502,8 @@ export const DealDetailForm = ({
     invoiceDate: invoiceDate ? new Date(invoiceDate).toISOString() : undefined,
     paymentStatus: invoiceDate ? paymentStatus : undefined,
     paymentDate: paymentStatus === 'Paid' && paymentDate ? new Date(paymentDate).toISOString() : undefined,
-  });
+    };
+  };
 
   const submitForApproval = () => {
     // Re-check every step before submitting.
@@ -534,6 +643,9 @@ export const DealDetailForm = ({
                 picEmail, setPicEmail,
                 picPhone, setPicPhone,
                 insuranceCompany, setInsuranceCompany,
+                extraLines, addProductLine, removeProductLine, updateProductLine,
+                primaryCoverNoteNumber, setPrimaryCoverNoteNumber,
+                allLineSumInsured, allLinePremium,
               }}
             />
           )}
@@ -604,6 +716,10 @@ export const DealDetailForm = ({
                 socSubTotal,
                 socTotalPremium,
                 premiumFromSoc,
+                primaryCoverNoteNumber,
+                extraLines,
+                allLineSumInsured,
+                allLinePremium,
               }}
             />
           )}
@@ -767,6 +883,23 @@ interface StepCoverageProps {
   picEmail: string;                                   setPicEmail: (v: string) => void;
   picPhone: string;                                   setPicPhone: (v: string) => void;
   insuranceCompany: string;                           setInsuranceCompany: (v: string) => void;
+  /** Multi-product (extra) lines beyond the primary product. */
+  extraLines: {
+    id: string;
+    productName: string;
+    sumInsured: string;
+    premiumAmount: string;
+    coverNoteNumber: string;
+  }[];
+  addProductLine: () => void;
+  removeProductLine: (id: string) => void;
+  updateProductLine: (id: string, patch: Partial<{
+    productName: string; sumInsured: string; premiumAmount: string; coverNoteNumber: string;
+  }>) => void;
+  primaryCoverNoteNumber: string;
+  setPrimaryCoverNoteNumber: (v: string) => void;
+  allLineSumInsured: number;
+  allLinePremium: number;
 }
 
 const StepCoverage: React.FC<StepCoverageProps> = (p) => {
@@ -879,6 +1012,124 @@ const StepCoverage: React.FC<StepCoverageProps> = (p) => {
         <Field label="Period End">
           <input type="date" value={p.periodEnd} onChange={e => p.setPeriodEnd(e.target.value)} className={inputClass} />
         </Field>
+      </div>
+
+      {/* ---------- Additional products (multi-product mode) ---------- */}
+      <div className="pt-4 border-t border-slate-100">
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h4 className="text-[13px] font-semibold text-slate-800">Additional Products</h4>
+            <p className="text-[11px] text-slate-500">
+              Add other coverages on the same placement — e.g. Property All Risk + Earthquake + MB + PL.
+              Each product can carry its own cover note number; everything else (period, insurer, PIC,
+              invoice, approval) stays shared.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={p.addProductLine}
+            className="shrink-0 text-[12px] font-semibold text-blue-600 hover:text-blue-700 border border-blue-200 hover:border-blue-300 px-2.5 py-1 rounded flex items-center gap-1"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add another product
+          </button>
+        </div>
+
+        {(p.extraLines.length > 0) && (
+          <div className="space-y-3 mt-3">
+            {/* Primary product card with cover note */}
+            <div className="border border-blue-200 bg-blue-50/40 rounded-md p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-[12px] font-bold text-blue-700 uppercase tracking-wider">Product 1 (Primary)</div>
+                <div className="text-[11px] text-slate-500">{p.typeOfInsurance || 'No product selected'}</div>
+              </div>
+              <Field label="Cover Note Number" hint="Per-product. Leave blank to assign later.">
+                <input
+                  type="text"
+                  value={p.primaryCoverNoteNumber}
+                  onChange={e => p.setPrimaryCoverNoteNumber(e.target.value)}
+                  className={inputClass}
+                  placeholder="e.g. CN/2026/001"
+                />
+              </Field>
+              <div className="mt-1 text-[11px] text-slate-500">
+                Type, Sum Insured and Premium Amount for the primary product come from the fields above.
+              </div>
+            </div>
+
+            {/* Extra lines */}
+            {p.extraLines.map((line, idx) => (
+              <div key={line.id} className="border border-slate-200 bg-white rounded-md p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-[12px] font-bold text-slate-700 uppercase tracking-wider">
+                    Product {idx + 2}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => p.removeProductLine(line.id)}
+                    className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                    title="Remove product"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Field label="Type of Insurance">
+                    <select
+                      value={line.productName}
+                      onChange={e => p.updateProductLine(line.id, { productName: e.target.value })}
+                      className={inputClass}
+                    >
+                      <option value="">Select Insurance Type</option>
+                      {insuranceTypeOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Cover Note Number" hint="Per-product. Leave blank to assign later.">
+                    <input
+                      type="text"
+                      value={line.coverNoteNumber}
+                      onChange={e => p.updateProductLine(line.id, { coverNoteNumber: e.target.value })}
+                      className={inputClass}
+                      placeholder="e.g. CN/2026/002"
+                    />
+                  </Field>
+                  <Field label={`Sum Insured (${p.currency})`}>
+                    <input
+                      type="text"
+                      value={line.sumInsured}
+                      onChange={e => p.updateProductLine(line.id, { sumInsured: formatNumber(e.target.value) })}
+                      className={inputClass}
+                      placeholder="0"
+                    />
+                  </Field>
+                  <Field label={`Premium Amount (${p.currency})`}>
+                    <input
+                      type="text"
+                      value={line.premiumAmount}
+                      onChange={e => p.updateProductLine(line.id, { premiumAmount: formatNumber(e.target.value) })}
+                      className={inputClass}
+                      placeholder="0"
+                    />
+                  </Field>
+                </div>
+              </div>
+            ))}
+
+            {/* Rollup totals */}
+            <div className="rounded-md border border-emerald-200 bg-emerald-50/50 p-3 flex flex-wrap gap-4 text-[12px]">
+              <div>
+                <div className="text-emerald-700 font-semibold uppercase tracking-wider text-[10px]">Total Sum Insured</div>
+                <div className="font-mono font-bold text-slate-900">{p.currency} {p.allLineSumInsured.toLocaleString()}</div>
+              </div>
+              <div>
+                <div className="text-emerald-700 font-semibold uppercase tracking-wider text-[10px]">Total Premium</div>
+                <div className="font-mono font-bold text-slate-900">{p.currency} {p.allLinePremium.toLocaleString()}</div>
+              </div>
+              <div className="ml-auto text-[11px] text-slate-500 self-end">
+                {p.extraLines.length + 1} products on this deal
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="pt-4 border-t border-slate-100">
@@ -1342,6 +1593,16 @@ interface PreviewData {
   socSubTotal: number;
   socTotalPremium: number;
   premiumFromSoc: boolean;
+  primaryCoverNoteNumber: string;
+  extraLines: {
+    id: string;
+    productName: string;
+    sumInsured: string;
+    premiumAmount: string;
+    coverNoteNumber: string;
+  }[];
+  allLineSumInsured: number;
+  allLinePremium: number;
 }
 
 const StepPreview: React.FC<{
@@ -1378,6 +1639,61 @@ const StepPreview: React.FC<{
           <PreviewRow label="Risk Location" value={data.riskLocation || '—'} multiline />
           <PreviewRow label="Risk Detail" value={data.riskDetail || '—'} multiline />
         </div>
+        {data.extraLines.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-slate-100">
+            <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">
+              Products on this deal ({data.extraLines.length + 1})
+            </div>
+            <div className="overflow-hidden rounded-md border border-slate-200">
+              <table className="w-full text-[12px]">
+                <thead className="bg-slate-50 text-slate-600">
+                  <tr>
+                    <th className="px-3 py-1.5 text-left font-semibold">Product</th>
+                    <th className="px-3 py-1.5 text-right font-semibold">Sum Insured</th>
+                    <th className="px-3 py-1.5 text-right font-semibold">Premium</th>
+                    <th className="px-3 py-1.5 text-left font-semibold">Cover Note</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  <tr className="bg-blue-50/30">
+                    <td className="px-3 py-1.5 font-semibold text-slate-800">{data.typeOfInsurance || '—'}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-slate-700">
+                      {data.sumInsured ? `${data.currency} ${data.sumInsured}` : '—'}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono text-slate-700">
+                      {data.premiumAmount ? `${data.currency} ${data.premiumAmount}` : '—'}
+                    </td>
+                    <td className="px-3 py-1.5 text-slate-600">{data.primaryCoverNoteNumber || <span className="italic text-slate-400">unassigned</span>}</td>
+                  </tr>
+                  {data.extraLines.map(l => (
+                    <tr key={l.id}>
+                      <td className="px-3 py-1.5 text-slate-800">{l.productName || '—'}</td>
+                      <td className="px-3 py-1.5 text-right font-mono text-slate-700">
+                        {l.sumInsured ? `${data.currency} ${l.sumInsured}` : '—'}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono text-slate-700">
+                        {l.premiumAmount ? `${data.currency} ${l.premiumAmount}` : '—'}
+                      </td>
+                      <td className="px-3 py-1.5 text-slate-600">{l.coverNoteNumber || <span className="italic text-slate-400">unassigned</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-emerald-50 font-semibold text-slate-900">
+                    <td className="px-3 py-1.5">Total</td>
+                    <td className="px-3 py-1.5 text-right font-mono">
+                      {data.currency} {data.allLineSumInsured.toLocaleString()}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono">
+                      {data.currency} {data.allLinePremium.toLocaleString()}
+                    </td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        )}
         <div className="mt-3 pt-3 border-t border-slate-100">
           <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">PIC</div>
           <div className="text-[13px] text-slate-700">

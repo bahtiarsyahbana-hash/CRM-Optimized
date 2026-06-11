@@ -216,8 +216,16 @@ export const PipelineView = () => {
                     </td>
                     <td className="px-6 py-3">
                       <div className="font-medium text-slate-800">{client ? client.lineOfBusiness : '-'}</div>
-                      <div className="flex items-center gap-2 mt-0.5">
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         {deal.typeOfInsurance && <span className="text-[11px] text-slate-500">{deal.typeOfInsurance}</span>}
+                        {deal.lines && deal.lines.length > 1 && (
+                          <span
+                            className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded"
+                            title={deal.lines.map(l => l.productName).join(' + ')}
+                          >
+                            {deal.lines.length} products
+                          </span>
+                        )}
                         {(deal.periodStart || deal.periodEnd) && (
                           <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
                             {deal.periodStart ? new Date(deal.periodStart).toLocaleDateString() : 'N/A'} - {deal.periodEnd ? new Date(deal.periodEnd).toLocaleDateString() : 'N/A'}

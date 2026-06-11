@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useData } from '../../context/DataContext';
-import { FileText, ExternalLink, X, Search, Receipt } from 'lucide-react';
+import { FileText, ExternalLink, X, Search, Receipt, ChevronRight, ChevronDown, Upload } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { Deal } from '../../types';
 import toast from 'react-hot-toast';
@@ -46,6 +46,41 @@ export const PoliciesView = () => {
 
   const [selectedPolicy, setSelectedPolicy] = useState<Deal | null>(null);
   const [invoicePolicy, setInvoicePolicy] = useState<Deal | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  /** Upload a file and persist it as the originalPolicyFile of a specific line. */
+  const handleUploadLine = (dealId: string, lineId: string) => {
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = 'application/pdf';
+    picker.onchange = (e: any) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const deal = deals.find(d => d.id === dealId);
+      if (!deal || !deal.lines) return;
+      const lines = deal.lines.map(l => l.id === lineId ? { ...l, originalPolicyFile: file.name } : l);
+      updateDeal(dealId, { lines });
+      toast.success(`${file.name} uploaded.`);
+    };
+    picker.click();
+  };
+
+  /** Patch a line's cover note number. */
+  const handleLineCoverNote = (dealId: string, lineId: string, value: string) => {
+    const deal = deals.find(d => d.id === dealId);
+    if (!deal || !deal.lines) return;
+    const lines = deal.lines.map(l => l.id === lineId ? { ...l, coverNoteNumber: value || undefined } : l);
+    updateDeal(dealId, { lines });
+  };
 
   const handleUploadOriginal = (dealId: string) => {
     // Simulate upload process
@@ -137,12 +172,35 @@ export const PoliciesView = () => {
           <tbody className="divide-y divide-slate-100/80">
             {policies.map(policy => {
               const client = clients.find(c => c.id === policy.clientId);
+              const isMulti = !!policy.lines && policy.lines.length > 1;
+              const isExpanded = expandedIds.has(policy.id);
               return (
-                <tr key={policy.id} className="hover:bg-slate-50 transition-colors group">
+              <React.Fragment key={policy.id}>
+                <tr className="hover:bg-slate-50 transition-colors group">
                   <td className="px-6 py-4">
-                    <div className="font-semibold text-slate-900">{client?.companyName || 'Unknown Client'}</div>
-                    <div className="text-[12px] text-slate-500 mt-1 flex items-center gap-2">
-                       {policy.typeOfInsurance} <span className="text-slate-300">•</span> {policy.insuranceCompany || 'TBA'}
+                    <div className="flex items-center gap-2">
+                      {isMulti && (
+                        <button
+                          onClick={() => toggleExpanded(policy.id)}
+                          className="p-0.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                          title={isExpanded ? 'Hide products' : 'Show products'}
+                        >
+                          {isExpanded
+                            ? <ChevronDown className="w-4 h-4" />
+                            : <ChevronRight className="w-4 h-4" />}
+                        </button>
+                      )}
+                      <div>
+                        <div className="font-semibold text-slate-900">{client?.companyName || 'Unknown Client'}</div>
+                        <div className="text-[12px] text-slate-500 mt-1 flex items-center gap-2 flex-wrap">
+                          {policy.typeOfInsurance} <span className="text-slate-300">•</span> {policy.insuranceCompany || 'TBA'}
+                          {isMulti && (
+                            <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded">
+                              {policy.lines!.length} products
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -189,7 +247,26 @@ export const PoliciesView = () => {
                     })()}
                   </td>
                   <td className="px-6 py-4">
-                    {policy.originalPolicyFile ? (
+                    {isMulti ? (() => {
+                      const uploaded = policy.lines!.filter(l => l.originalPolicyFile).length;
+                      const total = policy.lines!.length;
+                      return (
+                        <button
+                          onClick={() => toggleExpanded(policy.id)}
+                          className={cn(
+                            'text-[12px] font-semibold px-2.5 py-1 rounded border transition-colors',
+                            uploaded === total
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                              : uploaded === 0
+                                ? 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+                                : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                          )}
+                          title="Click to manage per-product files"
+                        >
+                          {uploaded}/{total} uploaded
+                        </button>
+                      );
+                    })() : policy.originalPolicyFile ? (
                       <div className="flex items-center gap-2 text-[12px] font-medium text-blue-600 bg-blue-50 px-2.5 py-1.5 rounded w-fit">
                         <FileText className="w-3.5 h-3.5" />
                         <span className="truncate max-w-[120px]">{policy.originalPolicyFile}</span>
@@ -217,6 +294,68 @@ export const PoliciesView = () => {
                     </div>
                   </td>
                 </tr>
+
+                {isMulti && isExpanded && (
+                  <tr className="bg-slate-50/60">
+                    <td colSpan={7} className="px-6 py-3">
+                      <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                        Products on this policy ({policy.lines!.length})
+                      </div>
+                      <div className="space-y-2">
+                        {policy.lines!.map((line, i) => (
+                          <div
+                            key={line.id}
+                            className="flex items-center gap-3 bg-white border border-slate-200 rounded-md px-3 py-2.5"
+                          >
+                            <span className="text-[11px] font-bold text-slate-400 w-6 shrink-0">P{i + 1}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[13px] font-semibold text-slate-800 truncate">
+                                {line.productName || '—'}
+                              </div>
+                              <div className="text-[11px] text-slate-500 mt-0.5">
+                                SI {policy.currency} {line.sumInsured?.toLocaleString() || '-'}
+                                <span className="mx-1 text-slate-300">•</span>
+                                Prem {policy.currency} {line.premiumAmount?.toLocaleString() || '-'}
+                              </div>
+                            </div>
+                            <div className="shrink-0">
+                              <label className="block text-[10px] text-slate-500 mb-0.5 font-semibold uppercase tracking-wider">Cover Note</label>
+                              <input
+                                type="text"
+                                defaultValue={line.coverNoteNumber || ''}
+                                onBlur={(e) => {
+                                  if (e.target.value !== (line.coverNoteNumber || '')) {
+                                    handleLineCoverNote(policy.id, line.id, e.target.value);
+                                  }
+                                }}
+                                placeholder="CN/2026/…"
+                                className="w-40 px-2 py-1 bg-white border border-slate-200 rounded text-[12px] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                              />
+                            </div>
+                            <div className="shrink-0 flex items-center gap-2">
+                              {line.originalPolicyFile ? (
+                                <span className="flex items-center gap-1 text-[11px] font-medium text-blue-700 bg-blue-50 border border-blue-100 px-2 py-1 rounded max-w-[160px]">
+                                  <FileText className="w-3 h-3 shrink-0" />
+                                  <span className="truncate">{line.originalPolicyFile}</span>
+                                </span>
+                              ) : (
+                                <span className="text-[11px] text-slate-400 italic">no file</span>
+                              )}
+                              <button
+                                onClick={() => handleUploadLine(policy.id, line.id)}
+                                className="px-2 py-1 text-[11px] font-semibold text-blue-600 border border-blue-200 hover:bg-blue-50 rounded transition-colors flex items-center gap-1"
+                              >
+                                <Upload className="w-3 h-3" />
+                                {line.originalPolicyFile ? 'Replace' : 'Upload'}
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
               )
             })}
             
