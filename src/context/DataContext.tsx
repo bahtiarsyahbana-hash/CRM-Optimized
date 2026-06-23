@@ -4,6 +4,12 @@ import {
   DealApprovalAction, DealApprovalLogEntry, DealApprovalStatus, DealStageLogEntry,
 } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  JANUARY_ACTUAL_CLIENTS,
+  normalizePrimaryClientName,
+} from '../data/januaryActualClients';
+
+const JANUARY_CLIENT_IMPORT_KEY = 'iris_january_2026_actual_clients_v1';
 
 /**
  * Migrate legacy claims to the new ClaimStatus values + dateRegistered field.
@@ -22,6 +28,67 @@ function migrateClaims(rawClaims: any[]): Claim[] {
     status: LEGACY_STATUS_MAP[c.status] ?? c.status,
     dateRegistered: c.dateRegistered || c.dateFiled || new Date().toISOString(),
   }));
+}
+
+function importJanuaryActualClients(existingClients: Client[]) {
+  const now = new Date().toISOString();
+  const clients = [...existingClients];
+  const indexByName = new Map<string, number>();
+
+  clients.forEach((client, index) => {
+    indexByName.set(normalizePrimaryClientName(client.companyName), index);
+  });
+
+  let created = 0;
+  let enriched = 0;
+
+  for (const seed of JANUARY_ACTUAL_CLIENTS) {
+    const seedNames = [seed.companyName, ...(seed.aliases || [])];
+    const existingIndex = seedNames
+      .map(normalizePrimaryClientName)
+      .map(name => indexByName.get(name))
+      .find((index): index is number => index !== undefined);
+
+    if (existingIndex !== undefined) {
+      const existing = clients[existingIndex];
+      const companyAddress = existing.companyAddress || seed.companyAddress;
+      const sourceClient = existing.sourceClient || seed.sourceClient;
+
+      if (companyAddress !== existing.companyAddress || sourceClient !== existing.sourceClient) {
+        clients[existingIndex] = {
+          ...existing,
+          companyAddress,
+          sourceClient,
+          updatedAt: now,
+        };
+        enriched++;
+      }
+
+      for (const name of seedNames) {
+        indexByName.set(normalizePrimaryClientName(name), existingIndex);
+      }
+      continue;
+    }
+
+    const newClient: Client = {
+      id: uuidv4(),
+      companyName: seed.companyName,
+      lineOfBusiness: 'Others',
+      companyAddress: seed.companyAddress,
+      sourceClient: seed.sourceClient,
+      companyClassMode: 'auto',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: 'January 2026 actual production import',
+    };
+    const newIndex = clients.push(newClient) - 1;
+    for (const name of seedNames) {
+      indexByName.set(normalizePrimaryClientName(name), newIndex);
+    }
+    created++;
+  }
+
+  return { clients, created, enriched };
 }
 
 interface DataContextType {
@@ -60,7 +127,20 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     // Load data from localStorage on mount
     const load = (key: string) => JSON.parse(localStorage.getItem(key) || '[]');
-    setClients(load('clients'));
+    const storedClients: Client[] = load('clients');
+    if (!localStorage.getItem(JANUARY_CLIENT_IMPORT_KEY)) {
+      const migration = importJanuaryActualClients(storedClients);
+      localStorage.setItem('clients', JSON.stringify(migration.clients));
+      localStorage.setItem(JANUARY_CLIENT_IMPORT_KEY, JSON.stringify({
+        importedAt: new Date().toISOString(),
+        sourceCount: JANUARY_ACTUAL_CLIENTS.length,
+        created: migration.created,
+        enriched: migration.enriched,
+      }));
+      setClients(migration.clients);
+    } else {
+      setClients(storedClients);
+    }
     setDeals(load('deals'));
     setClaims(migrateClaims(load('claims')));
     setEndorsements(load('endorsements'));
@@ -292,6 +372,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const clearDatabase = () => {
     localStorage.clear();
+    localStorage.setItem(JANUARY_CLIENT_IMPORT_KEY, JSON.stringify({ clearedAt: new Date().toISOString() }));
     setClients([]);
     setDeals([]);
     setClaims([]);
