@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import { useData } from '../../context/DataContext';
 import { Deal, DealType } from '../../types';
-import { Plus, Search, Building2, Edit2, Upload, GitBranch, Trash2, AlertTriangle, X, ShieldCheck } from 'lucide-react';
+import { Search, Building2, Edit2, GitBranch, Trash2, AlertTriangle, X, ShieldCheck } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
 import { DealDetailForm } from '../clients/DealDetailForm';
 import { SOCManagerModal } from './SOCManagerModal';
-import { RenewalImportModal } from './RenewalImportModal';
 import { DealJourneyView } from './DealJourneyView';
-import { ApprovalActionMenu, ApprovalStatusBadge } from './ApprovalActionMenu';
+import { ApprovalStatusBadge } from './ApprovalActionMenu';
 
 export const PipelineView = () => {
   const { deals, clients, deleteDeal, bindDeal } = useData();
@@ -16,8 +15,6 @@ export const PipelineView = () => {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<string>('All');
 
-  const [isAddOpen, setIsAddOpen] = useState(false);
-  const [isImportOpen, setIsImportOpen] = useState(false);
   const [editDeal, setEditDeal] = useState<Deal | null>(null);
   const [socDeal, setSocDeal] = useState<Deal | null>(null);
   const [journeyDeal, setJourneyDeal] = useState<Deal | null>(null);
@@ -62,6 +59,10 @@ export const PipelineView = () => {
   }
 
   const filteredDeals = deals.filter(d => {
+    // The Pipeline only shows approved deals — everything before approval
+    // lives in the Submission view and lands here once it's approved.
+    if (d.approvalStatus !== 'Approved') return false;
+
     // Determine which tab the deal belongs to
     const isRenewalTab = ['Renewal', 'Existing Client Update'].includes(d.dealType);
     const isNewBusinessTab = !isRenewalTab; // 'New Business', 'Cross Sell', 'Upsell'
@@ -106,24 +107,10 @@ export const PipelineView = () => {
     <div className="h-full flex flex-col p-8 relative bg-slate-50">
       <div className="flex justify-between items-center mb-6 shrink-0">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 mb-1">Pipeline & Opportunities</h1>
-          <p className="text-[13px] text-slate-500">Monitor and track deal opportunities connected to your clients.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setIsImportOpen(true)}
-            className="bg-white hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-md font-semibold text-[13px] flex items-center gap-2 transition-colors border border-slate-200 shadow-sm"
-          >
-            <Upload className="w-4 h-4" />
-            Import Renewals
-          </button>
-          <button 
-            onClick={() => setIsAddOpen(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-md font-semibold text-[13px] flex items-center gap-2 transition-colors shadow-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Add Deal
-          </button>
+          <h1 className="text-xl font-bold text-slate-900 mb-1">Pipeline &amp; Opportunities</h1>
+          <p className="text-[13px] text-slate-500">
+            Approved submissions land here automatically. Track them through to bind.
+          </p>
         </div>
       </div>
 
@@ -280,7 +267,6 @@ export const PipelineView = () => {
                             <ShieldCheck className="w-3 h-3" /> Bind
                           </button>
                         )}
-                        <ApprovalActionMenu deal={deal} />
                         <button
                           onClick={(e) => handleGenerateSOC(e, deal)}
                           className="text-[11px] font-semibold text-slate-500 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded transition-colors"
@@ -322,19 +308,15 @@ export const PipelineView = () => {
           {filteredDeals.length === 0 && (
              <div className="p-12 text-center text-slate-500 flex flex-col justify-center items-center">
                <Building2 className="w-10 h-10 text-slate-300 mb-3" />
-               <p className="font-medium text-slate-900 mb-1">No deals found</p>
-               <p className="text-[13px] text-slate-500">Create a deal linked to a client.</p>
+               <p className="font-medium text-slate-900 mb-1">No approved deals here yet</p>
+               <p className="text-[13px] text-slate-500">
+                 Deals appear in this tab once their submission is approved. Head to Submissions to create or approve one.
+               </p>
              </div>
           )}
         </div>
       </div>
 
-      {isAddOpen && (
-        <DealDetailForm onClose={() => setIsAddOpen(false)} />
-      )}
-      {isImportOpen && (
-        <RenewalImportModal onClose={() => setIsImportOpen(false)} />
-      )}
       {editDeal && (
         <DealDetailForm deal={editDeal} onClose={() => setEditDeal(null)} />
       )}

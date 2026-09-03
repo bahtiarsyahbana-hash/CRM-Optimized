@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Search, Building2, ShieldAlert, FileText } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 
-export const GlobalSearch = ({ onNavigate }: { onNavigate: (view: 'clients'|'pipelines'|'aftersales') => void }) => {
-  const { deals, claims } = useData();
+export const GlobalSearch = ({ onNavigate }: { onNavigate: (view: 'clients'|'submission'|'pipelines'|'aftersales') => void }) => {
+  const { deals, claims, clients } = useData();
   const [query, setQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -22,19 +22,26 @@ export const GlobalSearch = ({ onNavigate }: { onNavigate: (view: 'clients'|'pip
   if (query.length > 1) {
     const q = query.toLowerCase();
     
-    // Deals/Clients
+    // Deals — company/LOB live on the linked client, not the deal itself.
     deals.forEach(d => {
+      const client = clients.find(c => c.id === d.clientId);
+      const companyName = client?.companyName || 'Unknown Client';
+      const lineOfBusiness = client?.lineOfBusiness || '-';
       if (
-        (d.companyName || '').toLowerCase().includes(q) || 
-        (d.lineOfBusiness || '').toLowerCase().includes(q) ||
+        companyName.toLowerCase().includes(q) ||
+        lineOfBusiness.toLowerCase().includes(q) ||
         (d.typeOfInsurance && d.typeOfInsurance.toLowerCase().includes(q))
       ) {
-        results.push({ 
-          type: 'client', 
-          icon: Building2, 
-          title: d.companyName, 
-          subtitle: `${d.lineOfBusiness} • ${d.currency} ${d.sumInsured?.toLocaleString() || '0'}`, 
-          id: d.id 
+        const isApproved = d.approvalStatus === 'Approved';
+        results.push({
+          type: 'deal',
+          icon: Building2,
+          title: companyName,
+          // Tell the user where the hit will take them, since deals live in
+          // two different views depending on approval state.
+          subtitle: `${isApproved ? 'Pipeline' : 'Submission'} • ${lineOfBusiness} • ${d.currency} ${d.sumInsured?.toLocaleString() || '0'}`,
+          id: d.id,
+          approved: isApproved,
         });
       }
     });
@@ -53,12 +60,13 @@ export const GlobalSearch = ({ onNavigate }: { onNavigate: (view: 'clients'|'pip
     });
   }
 
-  const handleSelect = (type: string) => {
+  const handleSelect = (result: { type: string; approved?: boolean }) => {
     setIsOpen(false);
     setQuery('');
-    if (type === 'client') onNavigate('clients');
-    if (type === 'pipeline') onNavigate('pipelines'); // 'pipelines' is fine, though 'clients' could also be used since they are in the same view now. We'll map 'client' back to 'clients'.
-    if (type === 'claim') onNavigate('aftersales');
+    if (result.type === 'client') onNavigate('clients');
+    // Deals live in Submission until approved, then move to the Pipeline.
+    if (result.type === 'deal') onNavigate(result.approved ? 'pipelines' : 'submission');
+    if (result.type === 'claim') onNavigate('aftersales');
   };
 
   return (
@@ -85,7 +93,7 @@ export const GlobalSearch = ({ onNavigate }: { onNavigate: (view: 'clients'|'pip
                {results.map((r, i) => (
                  <button
                    key={`${r.type}-${r.id}-${i}`}
-                   onClick={() => handleSelect(r.type)}
+                   onClick={() => handleSelect(r)}
                    className="w-full px-4 py-3 text-left hover:bg-slate-50 flex gap-3 items-center border-b border-slate-50 last:border-0"
                  >
                    <div className="w-8 h-8 rounded-md bg-slate-100 flex items-center justify-center shrink-0 text-slate-500">

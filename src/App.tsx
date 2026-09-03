@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { DataProvider } from './context/DataContext';
 import { Toaster } from 'react-hot-toast';
-import { Briefcase, Users, LayoutDashboard, FileText, Database, ShieldAlert, GitMerge, PieChart, Settings } from 'lucide-react';
+import { Briefcase, Users, LayoutDashboard, FileText, Database, ShieldAlert, GitMerge, PieChart, Settings, Inbox } from 'lucide-react';
 import { cn } from './lib/utils';
 import { ClientsView } from './components/clients/ClientsView';
+import { SubmissionView } from './components/submission/SubmissionView';
 import { PipelineView } from './components/pipeline/PipelineView';
 import { PoliciesView } from './components/policies/PoliciesView';
 import { AftersalesView } from './components/aftersales/AftersalesView';
@@ -13,13 +14,14 @@ import { DashboardOverview } from './components/dashboard/DashboardOverview';
 import { SettingsView } from './components/settings/SettingsView';
 import { GlobalSearch } from './components/shared/GlobalSearch';
 
-type ViewState = 'dashboard' | 'clients' | 'pipelines' | 'policies' | 'claims' | 'aftersales' | 'architecture' | 'reports' | 'settings';
+type ViewState = 'dashboard' | 'clients' | 'submission' | 'pipelines' | 'policies' | 'claims' | 'aftersales' | 'architecture' | 'reports' | 'settings';
 
 function Dashboard() {
-  const [currentView, setCurrentView] = useState<ViewState>('pipelines'); // Pipeline as primary view
+  const [currentView, setCurrentView] = useState<ViewState>('submission'); // Submission is the entry point of the flow
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: PieChart },
+    { id: 'submission', label: 'Submission', icon: Inbox },
     { id: 'pipelines', label: 'Pipelines', icon: LayoutDashboard },
     { id: 'policies', label: 'Policies', icon: Briefcase },
     { id: 'claims', label: 'Claims', icon: ShieldAlert },
@@ -94,6 +96,7 @@ function Dashboard() {
           <div className="flex-1 overflow-auto">
             {currentView === 'dashboard' && <DashboardOverview />}
             {currentView === 'clients' && <ClientsView />}
+            {currentView === 'submission' && <SubmissionView />}
             {currentView === 'pipelines' && <PipelineView />}
             {currentView === 'policies' && <PoliciesView />}
             {currentView === 'claims' && <ClaimsView />}

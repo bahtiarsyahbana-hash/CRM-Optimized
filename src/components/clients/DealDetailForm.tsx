@@ -521,7 +521,7 @@ export const DealDetailForm = ({
       toast.success('Deal updated and submitted for approval');
     } else {
       addDeal(payload);
-      toast.success('Deal created and submitted for approval');
+      toast.success('Submission created and sent for approval');
     }
     onClose();
   };
@@ -552,7 +552,7 @@ export const DealDetailForm = ({
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">{deal ? 'Edit Pipeline Deal' : 'New Pipeline Deal'}</h2>
+            <h2 className="text-lg font-bold text-slate-900">{deal ? 'Edit Submission' : 'New Submission'}</h2>
             <p className="text-[13px] text-slate-500 mt-0.5">
               Step {stepIdx + 1} of {STEPS.length} — {currentStep.label}
             </p>
