@@ -1415,7 +1415,7 @@ const StepCommission: React.FC<{
         index={5}
         color="amber"
         label="Commission"
-        subtitle="All rates apply to the basic premium. Markup flows straight into commission."
+        subtitle="Commission, discount and EF are percentages of the basic premium; tax is charged on the commission earned. Markup flows straight into commission."
       />
 
       {hasMarkup && (
@@ -1455,7 +1455,10 @@ const StepCommission: React.FC<{
             onChange={e => p.setEfCommissionPercent(e.target.value)} className={inputClass} placeholder="0" />
         </Field>
 
-        <Field label="Tax %" hint={`Charged on basic premium. = ${p.currency} ${money(b.taxAmount)}`}>
+        <Field
+          label="Tax %"
+          hint={`On basic commission less discount (${p.currency} ${money(b.taxableCommission)}) = ${p.currency} ${money(b.taxAmount)}`}
+        >
           <input type="number" min="0" max="100" step="0.01" value={p.taxPercent}
             onChange={e => p.setTaxPercent(e.target.value)} className={inputClass}
             placeholder={`${DEFAULT_TAX_PERCENT}`} />
@@ -1567,6 +1570,7 @@ const StepCommission: React.FC<{
           </div>
 
           <div className="text-[11px] text-slate-500 leading-relaxed">
+            Tax = (Basic Commission − Discount) × Tax%.<br />
             Gross = Basic Commission + Markup.<br />
             Due to Insured = Basic Premium + Markup + Fees + Stamp Duty.<br />
             To Insurer = Basic Premium − Basic Commission + Stamp Duty + Tax.
@@ -1770,7 +1774,10 @@ const StepPreview: React.FC<{
           <Stat label={`Base (${data.breakdown.baseRate}%)`} value={money(data.breakdown.basicCommission)} />
           <Stat label={`Discount (${data.breakdown.discountPercent}%)`} value={`− ${money(data.breakdown.discountAmount)}`} />
           <Stat label={`EF (${data.breakdown.efPercent}%)`} value={`+ ${money(data.breakdown.efAmount)}`} />
-          <Stat label={`Tax (${data.breakdown.taxPercent}%)`} value={`− ${money(data.breakdown.taxAmount)}`} />
+          <Stat
+            label={`Tax (${data.breakdown.taxPercent}% of ${money(data.breakdown.taxableCommission)})`}
+            value={`− ${money(data.breakdown.taxAmount)}`}
+          />
         </div>
 
         <div className="mt-3 pt-3 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-3">
