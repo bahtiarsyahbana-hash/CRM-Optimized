@@ -63,14 +63,14 @@ export interface DealCommission {
   discountPercent?: number;
   /** "EF" commission — behind-the-table, custom % paid by insurer. */
   efCommissionPercent?: number;
-  /** PPh 23 tax % withheld by insurer on commission. Defaults to 2. */
+  /** Tax % applied to the basic premium. Defaults to 2. */
   taxPercent?: number;
-  /** Optional cashback paid to a sales agent. */
+  /** Recipient of the override fee (sales agent / introducer). */
   agentName?: string;
-  /** Numeric value of the cashback. Interpretation depends on `agentCashbackType`. */
-  agentCashback?: number;
-  /** How to interpret `agentCashback`: as a percentage of premium, or a fixed currency amount. */
-  agentCashbackType?: 'percent' | 'fixed';
+  /** Override fee paid out of commission. Interpretation depends on `overrideFeeType`. */
+  overrideFee?: number;
+  /** How to read `overrideFee`: a percentage of basic premium, or a fixed amount. */
+  overrideFeeType?: 'percent' | 'fixed';
 }
 
 /**
@@ -136,6 +136,16 @@ export const PRODUCT_INSURANCE_TYPES: Record<ProductType, string[]> = {
 /** Types valid for a product, or an empty list when no product is chosen yet. */
 export const insuranceTypesForProduct = (product?: ProductType | ''): string[] =>
   product ? (PRODUCT_INSURANCE_TYPES[product] ?? []) : [];
+
+/**
+ * How the basic premium is arrived at — either keyed in directly, or derived
+ * as a percentage of the sum insured.
+ */
+export type PremiumType = 'Fixed Amount' | 'Percentage from Sum Insured';
+export const PREMIUM_TYPES: PremiumType[] = ['Fixed Amount', 'Percentage from Sum Insured'];
+
+/** Default bea materai applied per policy document (IDR). */
+export const DEFAULT_STAMP_DUTY = 10_000;
 
 export type DealApprovalStatus =
   | 'Draft'
@@ -204,8 +214,23 @@ export interface Deal {
    *  on save, but the top-level fields are still written so older views work. */
   lines?: PolicyLine[];
   currency: string;
-  premiumType: string;
+
+  /* ---- Premium calculation -------------------------------------------- */
+  /** How basicPremium is arrived at: keyed in, or a % of sum insured. */
+  premiumType: PremiumType | string;
+  /** Rate applied to sumInsured when premiumType is 'Percentage from Sum Insured'. */
+  premiumRatePercent?: number;
+  /** The risk premium, before markup and fees. All commission maths keys off this. */
+  basicPremium?: number;
+  /** Optional uplift retained by the broker as additional commission. */
+  premiumMarkup?: number;
+  adminFee?: number;
+  policyFee?: number;
+  /** Bea materai. Passed through to the insurer, not broker income. */
+  stampDuty?: number;
+  /** Total payable by the client: basicPremium + markup + adminFee + policyFee + stampDuty. */
   premiumAmount?: number;
+  /** Free-text rate note shown on the cover note. */
   premiumRate?: string;
   socDetails?: SOCDetails;
   insuranceCompany?: string;

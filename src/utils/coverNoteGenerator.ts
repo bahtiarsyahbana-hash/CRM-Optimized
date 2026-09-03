@@ -66,7 +66,11 @@ export const generateCoverNote = (deal: Deal, client: Client) => {
   
   // Premium Calculation
   if (deal.premiumAmount) {
-     addRow('Premium Calculation:', `${deal.premiumType || 'Premium'}: ${deal.currency} ${deal.premiumAmount.toLocaleString()}`);
+    const basis = deal.premiumType === 'Percentage from Sum Insured' && deal.premiumRatePercent
+      ? `${deal.premiumRatePercent}% of Sum Insured`
+      : 'Fixed Amount';
+    addRow('Premium Basis:', basis);
+    addRow('Total Premium:', `${deal.currency} ${deal.premiumAmount.toLocaleString()}`);
   }
 
   // Footer / Signatures

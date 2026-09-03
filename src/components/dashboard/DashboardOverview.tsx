@@ -65,7 +65,7 @@ export const DashboardOverview = () => {
   );
 
   const totalNetIncome = useMemo(
-    () => boundMTD.reduce((sum, d) => sum + computeDealCommission(d).netIncome, 0),
+    () => boundMTD.reduce((sum, d) => sum + computeDealCommission(d).netAfterOverride, 0),
     [boundMTD],
   );
 

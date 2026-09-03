@@ -38,58 +38,123 @@ export function defaultCommissionRate(
   return COMMISSION_DEFAULT_BY_LOB[client.lineOfBusiness] ?? 15;
 }
 
+/** Inputs to the premium side of the calculation. */
+export interface PremiumInputs {
+  basicPremium: number;
+  premiumMarkup: number;
+  adminFee: number;
+  policyFee: number;
+  stampDuty: number;
+}
+
 export interface CommissionBreakdown {
+  /* ---- Premium ---- */
+  basicPremium: number;
+  premiumMarkup: number;
+  adminFee: number;
+  policyFee: number;
+  stampDuty: number;
+  /** basicPremium + markup + adminFee + policyFee + stampDuty */
+  totalPremiumPayable: number;
+
+  /* ---- Rates ---- */
   baseRate: number;
-  baseAmount: number;
   discountPercent: number;
-  discountAmount: number;
   efPercent: number;
-  efAmount: number;
-  /** baseAmount − discountAmount + efAmount */
-  grossCommission: number;
   taxPercent: number;
+
+  /* ---- Amounts, all keyed off basicPremium ---- */
+  basicCommission: number;
+  discountAmount: number;
+  efAmount: number;
   taxAmount: number;
-  agentCashback: number;
-  /** grossCommission − taxAmount − agentCashback */
-  netIncome: number;
+
+  /* ---- Outputs ---- */
+  /** basicPremium − basicCommission + stampDuty + tax */
+  premiumToInsurer: number;
+  /** basicCommission + markup */
+  totalGrossCommission: number;
+  /** basicCommission − discount − tax + markup + ef */
+  totalNetCommission: number;
+
+  /** Fee paid out to the agent / introducer. */
+  overrideFee: number;
+  /** totalNetCommission − overrideFee */
+  netAfterOverride: number;
 }
 
 /**
- * Pure calculator. Given a deal's premium and commission config, return all derived numbers.
- * Defaults: discount=0, ef=0, tax=2%, agentCashback=0.
+ * Pure calculator for the premium and commission model.
+ *
+ * Every percentage keys off the **basic premium** — the risk premium before
+ * markup and fees. That includes tax, which is charged on the basic premium
+ * rather than on the commission.
+ *
+ *   basicCommission   = basicPremium × baseRate%
+ *   discountAmount    = basicPremium × discountPercent%
+ *   efAmount          = basicPremium × efPercent%
+ *   taxAmount         = basicPremium × taxPercent%
+ *
+ *   premiumToInsurer     = basicPremium − basicCommission + stampDuty + tax
+ *   totalGrossCommission = basicCommission + markup
+ *   totalNetCommission   = basicCommission − discount − tax + markup + ef
+ *
+ * The markup is retained entirely by the broker — it never reaches the
+ * insurer — which is why it lands in commission rather than in premium.
  */
 export function computeCommission(
-  premium: number,
+  premium: PremiumInputs,
   commission: DealCommission | undefined,
 ): CommissionBreakdown {
+  const { basicPremium, premiumMarkup, adminFee, policyFee, stampDuty } = premium;
+
   const baseRate = commission?.baseRate ?? 0;
   const discountPercent = commission?.discountPercent ?? 0;
   const efPercent = commission?.efCommissionPercent ?? 0;
   const taxPercent = commission?.taxPercent ?? DEFAULT_TAX_PERCENT;
-  const agentCashback = commission?.agentCashback ?? 0;
 
-  const baseAmount = premium * (baseRate / 100);
-  const discountAmount = premium * (discountPercent / 100);
-  const efAmount = premium * (efPercent / 100);
-  const grossCommission = baseAmount - discountAmount + efAmount;
-  const taxAmount = Math.max(0, grossCommission) * (taxPercent / 100);
-  const netIncome = grossCommission - taxAmount - agentCashback;
+  const basicCommission = basicPremium * (baseRate / 100);
+  const discountAmount = basicPremium * (discountPercent / 100);
+  const efAmount = basicPremium * (efPercent / 100);
+  const taxAmount = basicPremium * (taxPercent / 100);
+
+  const totalPremiumPayable = basicPremium + premiumMarkup + adminFee + policyFee + stampDuty;
+  const premiumToInsurer = basicPremium - basicCommission + stampDuty + taxAmount;
+  const totalGrossCommission = basicCommission + premiumMarkup;
+  const totalNetCommission = basicCommission - discountAmount - taxAmount + premiumMarkup + efAmount;
+
+  // Override fee is a payout, applied after the net figure above.
+  const overrideFee = commission?.overrideFeeType === 'percent'
+    ? basicPremium * ((commission?.overrideFee ?? 0) / 100)
+    : (commission?.overrideFee ?? 0);
 
   return {
-    baseRate, baseAmount,
-    discountPercent, discountAmount,
-    efPercent, efAmount,
-    grossCommission,
-    taxPercent, taxAmount,
-    agentCashback,
-    netIncome,
+    basicPremium, premiumMarkup, adminFee, policyFee, stampDuty,
+    totalPremiumPayable,
+    baseRate, discountPercent, efPercent, taxPercent,
+    basicCommission, discountAmount, efAmount, taxAmount,
+    premiumToInsurer, totalGrossCommission, totalNetCommission,
+    overrideFee,
+    netAfterOverride: totalNetCommission - overrideFee,
+  };
+}
+
+/** Premium inputs for a stored deal, with sensible fallbacks. */
+export function premiumInputsFromDeal(deal: Deal): PremiumInputs {
+  return {
+    // Fall back to premiumAmount for deals recorded before the split.
+    basicPremium: deal.basicPremium ?? deal.premiumAmount ?? 0,
+    premiumMarkup: deal.premiumMarkup ?? 0,
+    adminFee: deal.adminFee ?? 0,
+    policyFee: deal.policyFee ?? 0,
+    stampDuty: deal.stampDuty ?? 0,
   };
 }
 
 /**
- * Convenience: compute commission for an entire Deal record.
- * Returns a zeroed breakdown if premium is missing.
+ * Convenience: compute the full breakdown for a stored Deal.
+ * Returns a zeroed breakdown if the premium is missing.
  */
 export function computeDealCommission(deal: Deal): CommissionBreakdown {
-  return computeCommission(deal.premiumAmount ?? 0, deal.commission);
+  return computeCommission(premiumInputsFromDeal(deal), deal.commission);
 }

@@ -10,11 +10,18 @@ import {
   insuranceTypesForProduct,
   DealApprovalStatus,
   DealDocuments,
-  SOCCoverage,
-  SOCDetails,
   PolicyLine,
+  PremiumType,
+  PREMIUM_TYPES,
+  DEFAULT_STAMP_DUTY,
 } from '../../types';
-import { defaultCommissionRate, DEFAULT_TAX_PERCENT } from '../../utils/commissionCalc';
+import {
+  defaultCommissionRate,
+  DEFAULT_TAX_PERCENT,
+  computeCommission,
+  PremiumInputs,
+  CommissionBreakdown,
+} from '../../utils/commissionCalc';
 import {
   X,
   ChevronLeft,
@@ -28,6 +35,7 @@ import {
   Upload,
   FileText,
   Send,
+  Info,
   Calculator,
   Plus,
   Trash2,
@@ -73,61 +81,14 @@ const formatNumber = (value: string) => {
 const parseNum = (v: string): number | undefined =>
   v && v.trim() !== '' ? parseFloat(v.replace(/,/g, '')) : undefined;
 
-type SOCTemplate = 'General' | 'Motor Vehicle' | 'Other';
-
 const newId = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2);
 
-const SOC_TEMPLATES: Record<SOCTemplate, Omit<SOCCoverage, 'id' | 'amount'>[]> = {
-  General: [
-    { name: 'FLEXAS (KEBAKARAN)',         rate: '0.0294',  rateType: 'percentage' },
-    { name: 'FWTWD (BANJIR)',             rate: '0.05',    rateType: 'percentage' },
-    { name: 'RSMDCC (HURU-HARA)',         rate: '0.00001', rateType: 'percentage' },
-    { name: 'OTHERS (LAIN-LAIN)',         rate: '0.00001', rateType: 'percentage' },
-    { name: 'EARTHQUAKE (GEMPA BUMI)',    rate: '0',       rateType: 'percentage' },
-    { name: 'MACHINERY BREAKDOWN',        rate: '0',       rateType: 'percentage' },
-    { name: 'PUBLIC LIABILITY',           rate: '0',       rateType: 'percentage' },
-    { name: 'BUSINESS INTERUPTION',       rate: '0',       rateType: 'percentage' },
-  ],
-  'Motor Vehicle': [
-    { name: 'Comprehensive',                                  rate: '1.2',     rateType: 'percentage' },
-    { name: 'LOADING RATE',                                   rate: '0',       rateType: 'percentage' },
-    { name: 'FWTWD',                                          rate: '0.10',    rateType: 'percentage' },
-    { name: 'SRCC',                                           rate: '0.05',    rateType: 'percentage' },
-    { name: 'TERRORISM SABOTAGE',                             rate: '0',       rateType: 'percentage' },
-    { name: 'PERSONAL ACCIDENT DRIVER : 10,000,000',          rate: '50000',   rateType: 'fixed' },
-    { name: 'PERSONAL ACCIDENT PASSENGER : 10,000,000',       rate: '40000',   rateType: 'fixed' },
-    { name: 'THIRD PARTY LIABILITY : 50,000,000',             rate: '375000',  rateType: 'fixed' },
-    { name: 'THEFT BY OWN DRIVER',                            rate: '0.01',    rateType: 'percentage' },
-    { name: 'AUTHORIZED GARAGE',                              rate: '0.01',    rateType: 'percentage' },
-  ],
-  Other: [{ name: 'Main Coverage', rate: '0', rateType: 'fixed' }],
-};
-
-const buildTemplateCoverages = (t: SOCTemplate): SOCCoverage[] =>
-  SOC_TEMPLATES[t].map(c => ({ ...c, id: newId(), amount: 0 }));
-
-const calcCoverageAmount = (cov: SOCCoverage, sumInsured: number): number => {
-  const rate = parseFloat(cov.rate || '0');
-  if (isNaN(rate)) return 0;
-  return cov.rateType === 'percentage' ? (rate / 100) * sumInsured : rate;
-};
-
-/**
- * Pick the SOC coverage template. The product category is authoritative —
- * under the Motor Vehicle product the types are "Comprehensive" / "Total Loss
- * Only", which no longer contain the word "motor". The string heuristic
- * remains as a fallback for deals saved before products became a cascade.
- */
-const guessSocTemplate = (productType: ProductType | '' | undefined, insuranceType: string): SOCTemplate => {
-  if (productType === 'Motor Vehicle') return 'Motor Vehicle';
-  if (productType) return 'General';
-  const t = (insuranceType || '').toLowerCase();
-  if (t.includes('motor') || t.includes('kendaraan') || t.includes('vehicle')) return 'Motor Vehicle';
-  return 'General';
-};
+/** Money formatter used across the calculation and preview panels. */
+const money = (n: number) =>
+  n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /* -------------------------------------------------------------------------- */
 /*                                Main wizard                                 */
@@ -177,10 +138,7 @@ export const DealDetailForm = ({
     deal?.sumInsured != null ? formatNumber(deal.sumInsured.toString()) : ''
   );
   const [currency, setCurrency] = useState(deal?.currency || 'IDR');
-  const [premiumType, setPremiumType] = useState(deal?.premiumType || 'Estimated Premium');
-  const [premiumAmount, setPremiumAmount] = useState<string>(
-    deal?.premiumAmount != null ? formatNumber(deal.premiumAmount.toString()) : ''
-  );
+  // Premium entry lives entirely in step 3 (Premium Calculation).
   const [riskLocation, setRiskLocation] = useState(deal?.riskLocation || '');
   const [riskDetail, setRiskDetail] = useState(deal?.riskDetail || '');
   const [periodStart, setPeriodStart] = useState(
@@ -270,61 +228,64 @@ export const DealDetailForm = ({
     setExtraLines(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
   };
 
-  // Derived totals — used by the SOC step (sumInsuredNumber) and the preview.
+  // Sum insured across the primary product and every extra line — the base
+  // for a percentage-derived premium.
   const allLineSumInsured = useMemo(() => {
     const primary = parseNum(sumInsured) ?? 0;
     const extras = extraLines.reduce((acc, l) => acc + (parseNum(l.sumInsured) ?? 0), 0);
     return primary + extras;
   }, [sumInsured, extraLines]);
 
-  const allLinePremium = useMemo(() => {
-    const primary = parseNum(premiumAmount) ?? 0;
-    const extras = extraLines.reduce((acc, l) => acc + (parseNum(l.premiumAmount) ?? 0), 0);
-    return primary + extras;
-  }, [premiumAmount, extraLines]);
-
-  /* ----- Step 3: Premium calculation (SOC-style) ----- */
-  const [socTemplate, setSocTemplate] = useState<SOCTemplate>(
-    (deal?.socDetails?.templateType as SOCTemplate)
-      || guessSocTemplate(deal?.productType, deal?.typeOfInsurance || '')
+  /* ----- Step 3: Premium calculation ----- */
+  const [premiumType, setPremiumType] = useState<PremiumType>(
+    (deal?.premiumType as PremiumType) === 'Percentage from Sum Insured'
+      ? 'Percentage from Sum Insured'
+      : 'Fixed Amount'
   );
-  const [socCoverages, setSocCoverages] = useState<SOCCoverage[]>(
-    deal?.socDetails?.coverages?.length
-      ? deal.socDetails.coverages
-      : buildTemplateCoverages(
-          (deal?.socDetails?.templateType as SOCTemplate)
-            || guessSocTemplate(deal?.productType, deal?.typeOfInsurance || '')
-        )
+  const [basicPremiumInput, setBasicPremiumInput] = useState<string>(
+    deal?.basicPremium != null ? formatNumber(String(deal.basicPremium)) : ''
   );
-  const [socDiscountPercent, setSocDiscountPercent] = useState<number>(deal?.socDetails?.discountPercent ?? 0);
-  const [socAdminFee, setSocAdminFee] = useState<number>(deal?.socDetails?.adminFee ?? 67000);
-  const [socPolicyFee, setSocPolicyFee] = useState<number>(deal?.socDetails?.policyFee ?? 0);
-  const [socDeductible, setSocDeductible] = useState<string>(deal?.socDetails?.deductible ?? '');
-  // When true, the calculator drives premiumAmount and the manual field in step 2 is locked.
-  const [premiumFromSoc, setPremiumFromSoc] = useState<boolean>(!!deal?.socDetails?.totalPremium);
-
-  // Use the multi-line total so SOC % rates apply across all products.
-  const currentSumInsuredNumber = allLineSumInsured;
-
-  const derivedSocCoverages: SOCCoverage[] = useMemo(
-    () => socCoverages.map(c => ({ ...c, amount: calcCoverageAmount(c, currentSumInsuredNumber) })),
-    [socCoverages, currentSumInsuredNumber]
+  const [premiumRatePercent, setPremiumRatePercent] = useState<string>(
+    deal?.premiumRatePercent != null ? String(deal.premiumRatePercent) : ''
+  );
+  const [premiumMarkup, setPremiumMarkup] = useState<string>(
+    deal?.premiumMarkup != null ? formatNumber(String(deal.premiumMarkup)) : ''
+  );
+  const [adminFee, setAdminFee] = useState<string>(
+    deal?.adminFee != null ? formatNumber(String(deal.adminFee)) : ''
+  );
+  const [policyFee, setPolicyFee] = useState<string>(
+    deal?.policyFee != null ? formatNumber(String(deal.policyFee)) : ''
+  );
+  const [stampDuty, setStampDuty] = useState<string>(
+    deal?.stampDuty != null ? formatNumber(String(deal.stampDuty)) : formatNumber(String(DEFAULT_STAMP_DUTY))
   );
 
-  const socSubTotal = useMemo(
-    () => derivedSocCoverages.reduce((acc, c) => acc + c.amount, 0),
-    [derivedSocCoverages]
-  );
-  const socDiscountAmount = (socSubTotal * socDiscountPercent) / 100;
-  const socTotalPremium = socSubTotal - socDiscountAmount + socAdminFee + socPolicyFee;
-
-  // When the SOC drives premium, mirror the total into the premium input.
-  useEffect(() => {
-    if (premiumFromSoc) {
-      setPremiumAmount(formatNumber(socTotalPremium.toFixed(0)));
+  /** Basic premium — keyed in directly, or derived from the sum insured. */
+  const basicPremium = useMemo(() => {
+    if (premiumType === 'Percentage from Sum Insured') {
+      const rate = parseNum(premiumRatePercent) ?? 0;
+      return allLineSumInsured * (rate / 100);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [premiumFromSoc, socTotalPremium]);
+    return parseNum(basicPremiumInput) ?? 0;
+  }, [premiumType, premiumRatePercent, allLineSumInsured, basicPremiumInput]);
+
+  const premiumInputs: PremiumInputs = useMemo(() => ({
+    basicPremium,
+    premiumMarkup: parseNum(premiumMarkup) ?? 0,
+    adminFee: parseNum(adminFee) ?? 0,
+    policyFee: parseNum(policyFee) ?? 0,
+    stampDuty: parseNum(stampDuty) ?? 0,
+  }), [basicPremium, premiumMarkup, adminFee, policyFee, stampDuty]);
+
+  // On a multi-product deal the extra lines carry their own premium; the
+  // primary product takes whatever is left of the basic premium so the lines
+  // always reconcile to the deal total.
+  const extraLinesPremiumTotal = useMemo(
+    () => extraLines.reduce((acc, l) => acc + (parseNum(l.premiumAmount) ?? 0), 0),
+    [extraLines]
+  );
+  const primaryLinePremium = Math.max(0, basicPremium - extraLinesPremiumTotal);
 
   /* ----- Step 4: Status & Documents ----- */
   const [statusStage, setStatusStage] = useState<DealStage>(deal?.statusStage || 'Leads');
@@ -357,11 +318,11 @@ export const DealDetailForm = ({
     deal?.commission?.taxPercent != null ? String(deal.commission.taxPercent) : String(DEFAULT_TAX_PERCENT)
   );
   const [agentName, setAgentName] = useState<string>(deal?.commission?.agentName || '');
-  const [agentCashback, setAgentCashback] = useState<string>(
-    deal?.commission?.agentCashback != null ? String(deal.commission.agentCashback) : ''
+  const [overrideFee, setOverrideFee] = useState<string>(
+    deal?.commission?.overrideFee != null ? String(deal.commission.overrideFee) : ''
   );
-  const [agentCashbackType, setAgentCashbackType] = useState<'percent' | 'fixed'>(
-    deal?.commission?.agentCashbackType || 'fixed'
+  const [overrideFeeType, setOverrideFeeType] = useState<'percent' | 'fixed'>(
+    deal?.commission?.overrideFeeType || 'fixed'
   );
 
   // Auto-suggest base commission once a Type of Insurance is chosen.
@@ -371,6 +332,20 @@ export const DealDetailForm = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [typeOfInsurance, productType, selectedClient?.id]);
+
+  /**
+   * Live breakdown, recomputed as the user types. Drives the totals panel in
+   * step 3, the commission panel in step 5, and the preview.
+   */
+  const breakdown = useMemo(() => computeCommission(premiumInputs, {
+    baseRate: parseNum(baseRate),
+    discountPercent: parseNum(discountPercent),
+    efCommissionPercent: parseNum(efCommissionPercent),
+    taxPercent: parseNum(taxPercent) ?? DEFAULT_TAX_PERCENT,
+    agentName: agentName || undefined,
+    overrideFee: parseNum(overrideFee),
+    overrideFeeType: overrideFee ? overrideFeeType : undefined,
+  }), [premiumInputs, baseRate, discountPercent, efCommissionPercent, taxPercent, agentName, overrideFee, overrideFeeType]);
 
   /* ----- Step 5: Preview / approval ----- */
   // Pre-existing invoicing fields are preserved silently — out of scope of this wizard,
@@ -390,10 +365,16 @@ export const DealDetailForm = ({
       !dealType ? 'Deal Type is required.' : null,
       !typeOfInsurance ? 'Type of Insurance is required.' : null,
       !productType ? 'Product Type is required.' : null,
-      !premiumType ? 'Premium Type is required.' : null,
       !insuranceCompany ? 'Insurance Company is required.' : null,
     ].filter(Boolean) as string[],
-    premium: [],
+    premium: [
+      premiumType === 'Percentage from Sum Insured' && !premiumRatePercent
+        ? 'Premium rate % is required.' : null,
+      premiumType === 'Percentage from Sum Insured' && allLineSumInsured <= 0
+        ? 'Sum Insured must be set in step 2 to derive a premium from it.' : null,
+      premiumType === 'Fixed Amount' && !basicPremiumInput
+        ? 'Basic Premium is required.' : null,
+    ].filter(Boolean) as string[],
     status: !statusStage ? ['Status Stage is required.'] : [],
     commission: [
       baseRate === '' ? 'Base Commission % is required.' : null,
@@ -433,33 +414,6 @@ export const DealDetailForm = ({
   };
 
   /* ----- Final submit ----- */
-  const buildSocDetails = (): SOCDetails | undefined => {
-    const hasMeaningfulData =
-      premiumFromSoc
-      || socTotalPremium > 0
-      || socCoverages.some(c => parseFloat(c.rate || '0') > 0)
-      || socDiscountPercent !== 0
-      || socAdminFee !== 0
-      || socPolicyFee !== 0
-      || (socDeductible && socDeductible.trim() !== '');
-    if (!hasMeaningfulData) return undefined;
-
-    return {
-      templateType: socTemplate,
-      coverages: derivedSocCoverages,
-      subTotal: socSubTotal,
-      discountPercent: socDiscountPercent,
-      adminFee: socAdminFee,
-      policyFee: socPolicyFee,
-      deductible: socDeductible || undefined,
-      totalPremium: socTotalPremium,
-      // Preserve existing meta if any (set later in SOCManagerModal when issuing the PDF).
-      attentionTo: deal?.socDetails?.attentionTo,
-      socDate: deal?.socDetails?.socDate,
-      socNumber: deal?.socDetails?.socNumber,
-    };
-  };
-
   const buildPayload = (approval: DealApprovalStatus): Omit<Deal, 'id' | 'createdAt' | 'updatedAt'> => {
     // Build line array. Only persist `lines` when the user has chosen
     // multi-product mode; otherwise legacy top-level fields are the source
@@ -470,7 +424,7 @@ export const DealDetailForm = ({
             id: deal?.lines?.[0]?.id || `${deal?.id || 'primary'}_p0`,
             productName: typeOfInsurance,
             sumInsured: parseNum(sumInsured),
-            premiumAmount: parseNum(premiumAmount),
+            premiumAmount: primaryLinePremium,
             coverNoteNumber: primaryCoverNoteNumber || undefined,
             originalPolicyFile: deal?.lines?.[0]?.originalPolicyFile,
           },
@@ -488,9 +442,6 @@ export const DealDetailForm = ({
     // When in multi-product mode the rolled-up totals become the canonical
     // values for any single-field consumers (claim screens, reporting…).
     const rollupSumInsured = isMultiProductMode ? allLineSumInsured : parseNum(sumInsured);
-    const rollupPremium = premiumFromSoc
-      ? socTotalPremium
-      : isMultiProductMode ? allLinePremium : parseNum(premiumAmount);
     const rollupTypeOfInsurance = isMultiProductMode
       ? [typeOfInsurance, ...extraLines.map(l => l.productName)].filter(Boolean).join(' + ')
       : typeOfInsurance;
@@ -504,10 +455,21 @@ export const DealDetailForm = ({
     sumInsured: rollupSumInsured,
     lines,
     currency,
+
+    /* Premium calculation */
     premiumType,
-    premiumAmount: rollupPremium,
+    premiumRatePercent: premiumType === 'Percentage from Sum Insured'
+      ? parseNum(premiumRatePercent) : undefined,
+    basicPremium,
+    premiumMarkup: premiumInputs.premiumMarkup || undefined,
+    adminFee: premiumInputs.adminFee || undefined,
+    policyFee: premiumInputs.policyFee || undefined,
+    stampDuty: premiumInputs.stampDuty || undefined,
+    // premiumAmount is the total the client is invoiced, which is what the
+    // policies list, GWP and invoice aging all read.
+    premiumAmount: breakdown.totalPremiumPayable,
+
     coverNoteNumber: isMultiProductMode ? undefined : (primaryCoverNoteNumber || deal?.coverNoteNumber),
-    socDetails: buildSocDetails(),
     insuranceCompany: insuranceCompany || undefined,
     periodStart: periodStart ? new Date(periodStart).toISOString() : undefined,
     periodEnd: periodEnd ? new Date(periodEnd).toISOString() : undefined,
@@ -525,8 +487,8 @@ export const DealDetailForm = ({
       efCommissionPercent: parseNum(efCommissionPercent),
       taxPercent: parseNum(taxPercent) ?? DEFAULT_TAX_PERCENT,
       agentName: agentName || undefined,
-      agentCashback: parseNum(agentCashback),
-      agentCashbackType: agentCashback ? agentCashbackType : undefined,
+      overrideFee: parseNum(overrideFee),
+      overrideFeeType: overrideFee ? overrideFeeType : undefined,
     },
     invoiceDate: invoiceDate ? new Date(invoiceDate).toISOString() : undefined,
     paymentStatus: invoiceDate ? paymentStatus : undefined,
@@ -662,9 +624,6 @@ export const DealDetailForm = ({
                 availableInsuranceTypes,
                 sumInsured, setSumInsured,
                 currency, setCurrency,
-                premiumType, setPremiumType,
-                premiumAmount, setPremiumAmount,
-                premiumLocked: premiumFromSoc,
                 riskLocation, setRiskLocation,
                 riskDetail, setRiskDetail,
                 periodStart, setPeriodStart,
@@ -675,34 +634,30 @@ export const DealDetailForm = ({
                 insuranceCompany, setInsuranceCompany,
                 extraLines, addProductLine, removeProductLine, updateProductLine,
                 primaryCoverNoteNumber, setPrimaryCoverNoteNumber,
-                allLineSumInsured, allLinePremium,
+                allLineSumInsured,
+                extraLinesPremiumTotal,
               }}
             />
           )}
           {currentStep.key === 'premium' && (
             <StepPremium
               currency={currency}
-              sumInsuredNumber={currentSumInsuredNumber}
-              template={socTemplate}
-              setTemplate={(t) => {
-                setSocTemplate(t);
-                setSocCoverages(buildTemplateCoverages(t));
-              }}
-              coverages={derivedSocCoverages}
-              setCoverages={setSocCoverages}
-              discountPercent={socDiscountPercent}
-              setDiscountPercent={setSocDiscountPercent}
-              adminFee={socAdminFee}
-              setAdminFee={setSocAdminFee}
-              policyFee={socPolicyFee}
-              setPolicyFee={setSocPolicyFee}
-              deductible={socDeductible}
-              setDeductible={setSocDeductible}
-              subTotal={socSubTotal}
-              discountAmount={socDiscountAmount}
-              totalPremium={socTotalPremium}
-              premiumFromSoc={premiumFromSoc}
-              setPremiumFromSoc={setPremiumFromSoc}
+              sumInsured={allLineSumInsured}
+              premiumType={premiumType}
+              setPremiumType={setPremiumType}
+              basicPremiumInput={basicPremiumInput}
+              setBasicPremiumInput={setBasicPremiumInput}
+              premiumRatePercent={premiumRatePercent}
+              setPremiumRatePercent={setPremiumRatePercent}
+              premiumMarkup={premiumMarkup}
+              setPremiumMarkup={setPremiumMarkup}
+              adminFee={adminFee}
+              setAdminFee={setAdminFee}
+              policyFee={policyFee}
+              setPolicyFee={setPolicyFee}
+              stampDuty={stampDuty}
+              setStampDuty={setStampDuty}
+              breakdown={breakdown}
             />
           )}
           {currentStep.key === 'status' && (
@@ -722,9 +677,10 @@ export const DealDetailForm = ({
                 efCommissionPercent, setEfCommissionPercent,
                 taxPercent, setTaxPercent,
                 agentName, setAgentName,
-                agentCashback, setAgentCashback,
-                agentCashbackType, setAgentCashbackType,
+                overrideFee, setOverrideFee,
+                overrideFeeType, setOverrideFeeType,
                 currency,
+                breakdown,
               }}
             />
           )}
@@ -733,23 +689,14 @@ export const DealDetailForm = ({
               client={selectedClient}
               data={{
                 clientAddress, dealType, typeOfInsurance, productType, sumInsured,
-                currency, premiumType, premiumAmount, riskLocation, riskDetail, periodStart, periodEnd,
+                currency, premiumType, riskLocation, riskDetail, periodStart, periodEnd,
                 picName, picEmail, picPhone, insuranceCompany, statusStage, documents,
-                baseRate, discountPercent, efCommissionPercent, taxPercent,
-                agentName, agentCashback, agentCashbackType,
-                socTemplate,
-                socCoverages: derivedSocCoverages,
-                socDiscountPercent,
-                socAdminFee,
-                socPolicyFee,
-                socDeductible,
-                socSubTotal,
-                socTotalPremium,
-                premiumFromSoc,
+                agentName, overrideFeeType,
+                premiumRatePercent,
+                breakdown,
                 primaryCoverNoteNumber,
                 extraLines,
                 allLineSumInsured,
-                allLinePremium,
               }}
             />
           )}
@@ -903,10 +850,6 @@ interface StepCoverageProps {
   availableInsuranceTypes: string[];
   sumInsured: string;                                 setSumInsured: (v: string) => void;
   currency: string;                                   setCurrency: (v: string) => void;
-  premiumType: string;                                setPremiumType: (v: string) => void;
-  premiumAmount: string;                              setPremiumAmount: (v: string) => void;
-  /** When true, the premium amount field is locked because the SOC calculator drives it. */
-  premiumLocked?: boolean;
   riskLocation: string;                               setRiskLocation: (v: string) => void;
   riskDetail: string;                                 setRiskDetail: (v: string) => void;
   periodStart: string;                                setPeriodStart: (v: string) => void;
@@ -931,7 +874,7 @@ interface StepCoverageProps {
   primaryCoverNoteNumber: string;
   setPrimaryCoverNoteNumber: (v: string) => void;
   allLineSumInsured: number;
-  allLinePremium: number;
+  extraLinesPremiumTotal: number;
 }
 
 const StepCoverage: React.FC<StepCoverageProps> = (p) => {
@@ -996,32 +939,15 @@ const StepCoverage: React.FC<StepCoverageProps> = (p) => {
           </select>
         </Field>
 
-        <Field label={`Sum Insured (${p.currency})`}>
+        <Field
+          label={`Sum Insured (${p.currency})`}
+          hint="Premium is worked out in step 3."
+        >
           <input
             type="text" value={p.sumInsured}
             onChange={e => p.setSumInsured(formatNumber(e.target.value))}
             className={inputClass} placeholder="1,000,000"
           />
-        </Field>
-
-        <Field
-          label={`Premium Amount (${p.currency})`}
-          hint={p.premiumLocked ? 'Driven by the SOC calculator in step 3 — edit there to change.' : undefined}
-        >
-          <input
-            type="text" value={p.premiumAmount}
-            onChange={e => p.setPremiumAmount(formatNumber(e.target.value))}
-            disabled={p.premiumLocked}
-            className={cn(inputClass, p.premiumLocked && 'bg-slate-50 text-slate-500 cursor-not-allowed')}
-            placeholder="0"
-          />
-        </Field>
-
-        <Field label="Premium Type" required>
-          <select value={p.premiumType} onChange={e => p.setPremiumType(e.target.value)} className={inputClass}>
-            <option value="Estimated Premium">Estimated Premium</option>
-            <option value="Fixed Premium">Fixed Premium</option>
-          </select>
         </Field>
 
         <Field label="Insurance Company" required>
@@ -1143,7 +1069,10 @@ const StepCoverage: React.FC<StepCoverageProps> = (p) => {
                       placeholder="0"
                     />
                   </Field>
-                  <Field label={`Premium Amount (${p.currency})`}>
+                  <Field
+                    label={`Premium Share (${p.currency})`}
+                    hint="Optional — this product's slice of the basic premium."
+                  >
                     <input
                       type="text"
                       value={line.premiumAmount}
@@ -1163,11 +1092,11 @@ const StepCoverage: React.FC<StepCoverageProps> = (p) => {
                 <div className="font-mono font-bold text-slate-900">{p.currency} {p.allLineSumInsured.toLocaleString()}</div>
               </div>
               <div>
-                <div className="text-emerald-700 font-semibold uppercase tracking-wider text-[10px]">Total Premium</div>
-                <div className="font-mono font-bold text-slate-900">{p.currency} {p.allLinePremium.toLocaleString()}</div>
+                <div className="text-emerald-700 font-semibold uppercase tracking-wider text-[10px]">Allocated to Extra Products</div>
+                <div className="font-mono font-bold text-slate-900">{p.currency} {p.extraLinesPremiumTotal.toLocaleString()}</div>
               </div>
               <div className="ml-auto text-[11px] text-slate-500 self-end">
-                {p.extraLines.length + 1} products on this deal
+                {p.extraLines.length + 1} products · premium set in step 3
               </div>
             </div>
           </div>
@@ -1194,226 +1123,180 @@ const StepCoverage: React.FC<StepCoverageProps> = (p) => {
 };
 
 /* -------------------------------------------------------------------------- */
-/*                      Step 3: Premium Calculation (SOC)                     */
+/*                        Step 3: Premium Calculation                         */
 /* -------------------------------------------------------------------------- */
 
 interface StepPremiumProps {
   currency: string;
-  sumInsuredNumber: number;
-  template: SOCTemplate;
-  setTemplate: (t: SOCTemplate) => void;
-  coverages: SOCCoverage[]; // already derived (amount computed)
-  setCoverages: React.Dispatch<React.SetStateAction<SOCCoverage[]>>;
-  discountPercent: number;
-  setDiscountPercent: (v: number) => void;
-  adminFee: number;
-  setAdminFee: (v: number) => void;
-  policyFee: number;
-  setPolicyFee: (v: number) => void;
-  deductible: string;
-  setDeductible: (v: string) => void;
-  subTotal: number;
-  discountAmount: number;
-  totalPremium: number;
-  premiumFromSoc: boolean;
-  setPremiumFromSoc: (v: boolean) => void;
+  sumInsured: number;
+  premiumType: PremiumType;                setPremiumType: (v: PremiumType) => void;
+  basicPremiumInput: string;               setBasicPremiumInput: (v: string) => void;
+  premiumRatePercent: string;              setPremiumRatePercent: (v: string) => void;
+  premiumMarkup: string;                   setPremiumMarkup: (v: string) => void;
+  adminFee: string;                        setAdminFee: (v: string) => void;
+  policyFee: string;                       setPolicyFee: (v: string) => void;
+  stampDuty: string;                       setStampDuty: (v: string) => void;
+  breakdown: CommissionBreakdown;
 }
 
-const fmtAmount = (n: number) =>
-  n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
 const StepPremium: React.FC<StepPremiumProps> = (p) => {
-  const update = (id: string, field: keyof SOCCoverage, value: any) => {
-    p.setCoverages(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
-  };
-  const remove = (id: string) => p.setCoverages(prev => prev.filter(c => c.id !== id));
-  const addRow = () => p.setCoverages(prev => [
-    ...prev,
-    { id: newId(), name: '', rate: '0', rateType: 'percentage', amount: 0 },
-  ]);
+  const b = p.breakdown;
+  const isPercent = p.premiumType === 'Percentage from Sum Insured';
 
   return (
-    <div className="bg-white rounded-lg p-6 border border-slate-200 max-w-5xl mx-auto space-y-5">
+    <div className="bg-white rounded-lg p-6 border border-slate-200 max-w-4xl mx-auto space-y-6">
       <SectionTitle
         index={3}
         color="purple"
         label="Premium Calculation"
-        subtitle="Build the premium with the same SOC coverage structure used on the final document."
+        subtitle="Set the basic premium, then any markup and fees. Commission is worked out from the basic premium in step 5."
       />
 
-      {p.sumInsuredNumber === 0 && (
-        <div className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-          Sum Insured is 0 — percentage-rated coverages will calculate to 0. Set Sum Insured in step 2 first.
+      {/* ---- Premium type ---- */}
+      <Field label="Premium Type" required>
+        <div className="flex rounded-md overflow-hidden border border-slate-200">
+          {PREMIUM_TYPES.map((opt, idx) => (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => p.setPremiumType(opt)}
+              className={cn(
+                'flex-1 px-3 py-2 text-[13px] font-semibold transition-colors',
+                idx > 0 && 'border-l border-slate-200',
+                p.premiumType === opt ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+              )}
+            >
+              {opt}
+            </button>
+          ))}
         </div>
-      )}
+      </Field>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Field label="SOC Template" className="md:col-span-1">
-          <select
-            value={p.template}
-            onChange={e => p.setTemplate(e.target.value as SOCTemplate)}
-            className={inputClass}
-          >
-            <option value="General">General Insurance</option>
-            <option value="Motor Vehicle">Motor Vehicle</option>
-            <option value="Other">Other / Custom</option>
-          </select>
-        </Field>
-        <Field label="Deductible" className="md:col-span-2">
+      {/* ---- Basic premium ---- */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        {isPercent ? (
+          <>
+            <Field label="Rate (% of Sum Insured)" required>
+              <input
+                type="number" min="0" step="0.0001"
+                value={p.premiumRatePercent}
+                onChange={e => p.setPremiumRatePercent(e.target.value)}
+                className={inputClass}
+                placeholder="e.g. 0.15"
+              />
+            </Field>
+            <Field label={`Basic Premium (${p.currency})`} hint="Derived from rate × sum insured.">
+              <div className={cn(inputClass, 'bg-slate-50 font-mono text-slate-700 flex items-center justify-between')}>
+                <span className="text-[11px] text-slate-400">
+                  {p.sumInsured.toLocaleString()} × {p.premiumRatePercent || 0}%
+                </span>
+                <span className="font-semibold text-slate-900">{money(b.basicPremium)}</span>
+              </div>
+            </Field>
+          </>
+        ) : (
+          <>
+            <Field label={`Basic Premium (${p.currency})`} required>
+              <input
+                type="text"
+                value={p.basicPremiumInput}
+                onChange={e => p.setBasicPremiumInput(formatNumber(e.target.value))}
+                className={inputClass}
+                placeholder="0"
+              />
+            </Field>
+            <Field label={`Sum Insured (${p.currency})`} hint="Set in step 2, shown here for reference.">
+              <div className={cn(inputClass, 'bg-slate-50 font-mono text-slate-600')}>
+                {p.sumInsured.toLocaleString()}
+              </div>
+            </Field>
+          </>
+        )}
+
+        <Field
+          label={`Premium Markup (${p.currency})`}
+          hint="Optional uplift retained by the broker — becomes additional commission."
+        >
           <input
             type="text"
-            value={p.deductible}
-            onChange={e => p.setDeductible(e.target.value)}
+            value={p.premiumMarkup}
+            onChange={e => p.setPremiumMarkup(formatNumber(e.target.value))}
             className={inputClass}
-            placeholder="e.g. As per policy"
+            placeholder="0"
+          />
+        </Field>
+
+        <Field label={`Stamp Duty (${p.currency})`} hint="Bea materai. Passed through to the insurer.">
+          <input
+            type="text"
+            value={p.stampDuty}
+            onChange={e => p.setStampDuty(formatNumber(e.target.value))}
+            className={inputClass}
+            placeholder="0"
+          />
+        </Field>
+
+        <Field label={`Admin Fee (${p.currency})`}>
+          <input
+            type="text"
+            value={p.adminFee}
+            onChange={e => p.setAdminFee(formatNumber(e.target.value))}
+            className={inputClass}
+            placeholder="0"
+          />
+        </Field>
+
+        <Field label={`Policy Fee (${p.currency})`}>
+          <input
+            type="text"
+            value={p.policyFee}
+            onChange={e => p.setPolicyFee(formatNumber(e.target.value))}
+            className={inputClass}
+            placeholder="0"
           />
         </Field>
       </div>
 
-      <div className="rounded-lg border border-slate-200 overflow-hidden text-[13px]">
-        <table className="w-full text-left">
-          <thead className="bg-slate-900 text-white">
-            <tr>
-              <th className="px-3 py-2 font-semibold w-10 text-center">NO.</th>
-              <th className="px-3 py-2 font-semibold">COVERAGE</th>
-              <th className="px-3 py-2 font-semibold w-56">RATE</th>
-              <th className="px-3 py-2 font-semibold text-right w-40">AMOUNT ({p.currency})</th>
-              <th className="px-2 py-2 font-semibold w-10"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 bg-white">
-            {p.coverages.map((cov, i) => (
-              <tr key={cov.id} className="hover:bg-slate-50">
-                <td className="px-3 py-2 text-center text-slate-500">{i + 1}</td>
-                <td className="px-3 py-2">
-                  <input
-                    type="text"
-                    value={cov.name}
-                    onChange={e => update(cov.id, 'name', e.target.value)}
-                    className="w-full bg-transparent border-none focus:ring-0 p-0 text-[12px] font-medium text-slate-800 uppercase"
-                    placeholder="Coverage Name"
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="text"
-                      value={cov.rate}
-                      onChange={e => update(cov.id, 'rate', e.target.value)}
-                      className="w-20 px-1 py-1 bg-white border border-slate-200 rounded text-[12px] focus:outline-none focus:border-blue-500 text-right font-mono"
-                    />
-                    <select
-                      value={cov.rateType}
-                      onChange={e => update(cov.id, 'rateType', e.target.value as 'percentage' | 'fixed')}
-                      className="bg-transparent border-none text-[11px] text-slate-500 focus:ring-0 cursor-pointer p-0"
-                    >
-                      <option value="percentage">%</option>
-                      <option value="fixed">Fixed</option>
-                    </select>
-                  </div>
-                </td>
-                <td className="px-3 py-2 text-right font-mono font-medium text-slate-800 text-[12px]">
-                  {fmtAmount(cov.amount)}
-                </td>
-                <td className="px-2 py-2 text-center">
-                  <button
-                    type="button"
-                    onClick={() => remove(cov.id)}
-                    className="text-slate-400 hover:text-red-500 transition-colors"
-                    title="Remove"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </td>
-              </tr>
-            ))}
-            <tr>
-              <td colSpan={5} className="px-4 py-2.5 bg-slate-50">
-                <button
-                  type="button"
-                  onClick={addRow}
-                  className="flex items-center gap-1.5 text-[12px] font-semibold text-blue-600 hover:text-blue-700"
-                >
-                  <Plus className="w-4 h-4" /> Add Coverage
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        {/* Totals */}
-        <div className="bg-slate-100/50 p-5 border-t border-slate-200 grid grid-cols-2 gap-4">
-          <div className="space-y-3 col-start-2">
-            <div className="flex items-center justify-between text-[13px]">
-              <span className="text-slate-600 font-medium">Sub Total:</span>
-              <span className="font-mono text-slate-800">{fmtAmount(p.subTotal)}</span>
-            </div>
-            <div className="flex items-center justify-between text-emerald-600 text-[13px]">
-              <span className="font-medium">Discount (%):</span>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  value={p.discountPercent}
-                  onChange={e => p.setDiscountPercent(parseFloat(e.target.value) || 0)}
-                  className="w-16 px-2 py-1 bg-white border border-slate-200 rounded text-[12px] text-right focus:outline-none focus:border-blue-500"
-                />
-                <span className="font-mono">-{fmtAmount(p.discountAmount)}</span>
-              </div>
-            </div>
-            <div className="flex items-center justify-between text-slate-600 text-[13px]">
-              <span className="font-medium">Admin Cost:</span>
-              <input
-                type="number"
-                value={p.adminFee}
-                onChange={e => p.setAdminFee(parseFloat(e.target.value) || 0)}
-                className="w-28 px-2 py-1 bg-white border border-slate-200 rounded text-[12px] text-right font-mono focus:outline-none focus:border-blue-500"
-              />
-            </div>
-            <div className="flex items-center justify-between text-slate-600 text-[13px]">
-              <span className="font-medium">Policy Fee:</span>
-              <input
-                type="number"
-                value={p.policyFee}
-                onChange={e => p.setPolicyFee(parseFloat(e.target.value) || 0)}
-                className="w-28 px-2 py-1 bg-white border border-slate-200 rounded text-[12px] text-right font-mono focus:outline-none focus:border-blue-500"
-              />
-            </div>
-            <div className="pt-3 border-t border-slate-300 flex items-center justify-between mt-2">
-              <span className="text-[14px] font-bold text-slate-900">Total Premium:</span>
-              <span className="text-[15px] font-bold font-mono text-slate-900">
-                {p.currency} {fmtAmount(p.totalPremium)}
-              </span>
-            </div>
+      {/* ---- Totals ---- */}
+      <div className="rounded-lg border border-slate-200 overflow-hidden">
+        <div className="bg-slate-50 px-4 py-2 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+          Premium Summary
+        </div>
+        <div className="p-4 space-y-2 text-[13px]">
+          <TotalLine label="Basic Premium" value={money(b.basicPremium)} />
+          {b.premiumMarkup > 0 && (
+            <TotalLine label="Premium Markup" value={`+ ${money(b.premiumMarkup)}`} accent="blue" />
+          )}
+          {b.adminFee > 0 && <TotalLine label="Admin Fee" value={`+ ${money(b.adminFee)}`} />}
+          {b.policyFee > 0 && <TotalLine label="Policy Fee" value={`+ ${money(b.policyFee)}`} />}
+          {b.stampDuty > 0 && <TotalLine label="Stamp Duty" value={`+ ${money(b.stampDuty)}`} />}
+          <div className="pt-2 mt-1 border-t border-slate-200 flex items-center justify-between">
+            <span className="text-[14px] font-bold text-slate-900">Total Premium Payable</span>
+            <span className="text-[15px] font-bold font-mono text-slate-900">
+              {p.currency} {money(b.totalPremiumPayable)}
+            </span>
           </div>
         </div>
       </div>
 
-      <label className={cn(
-        'flex items-start gap-3 rounded-md border px-3 py-2.5 cursor-pointer transition-colors',
-        p.premiumFromSoc
-          ? 'bg-blue-50 border-blue-200'
-          : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
-      )}>
-        <input
-          type="checkbox"
-          className="mt-0.5"
-          checked={p.premiumFromSoc}
-          onChange={e => p.setPremiumFromSoc(e.target.checked)}
-        />
-        <div>
-          <div className="text-[13px] font-semibold text-slate-800">
-            Use this total as the deal's Premium Amount
-          </div>
-          <div className="text-[12px] text-slate-500">
-            When on, the Premium Amount in step 2 is locked and follows this total automatically.
-            Turn off if you'd rather enter premium manually and treat the SOC as reference only.
-          </div>
+      {b.premiumMarkup > 0 && (
+        <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-[12px] text-blue-800">
+          A markup of <span className="font-semibold">{p.currency} {money(b.premiumMarkup)}</span> is
+          retained by the broker and shows up as additional commission in step 5. It is not passed to the insurer.
         </div>
-      </label>
+      )}
     </div>
   );
 };
 
+const TotalLine: React.FC<{ label: string; value: string; accent?: 'blue' }> = ({ label, value, accent }) => (
+  <div className="flex items-center justify-between">
+    <span className={cn('font-medium', accent === 'blue' ? 'text-blue-700' : 'text-slate-600')}>{label}</span>
+    <span className={cn('font-mono', accent === 'blue' ? 'text-blue-700 font-semibold' : 'text-slate-800')}>
+      {value}
+    </span>
+  </div>
+);
 /* -------------------------------------------------------------------------- */
 /*                       Step 4: Status & Documents                           */
 /* -------------------------------------------------------------------------- */
@@ -1509,7 +1392,7 @@ const StepStatus: React.FC<{
 };
 
 /* -------------------------------------------------------------------------- */
-/*                           Step 4: Commission                               */
+/*                            Step 5: Commission                              */
 /* -------------------------------------------------------------------------- */
 
 const StepCommission: React.FC<{
@@ -1518,86 +1401,166 @@ const StepCommission: React.FC<{
   efCommissionPercent: string; setEfCommissionPercent: (v: string) => void;
   taxPercent: string;          setTaxPercent: (v: string) => void;
   agentName: string;           setAgentName: (v: string) => void;
-  agentCashback: string;       setAgentCashback: (v: string) => void;
-  agentCashbackType: 'percent' | 'fixed'; setAgentCashbackType: (v: 'percent' | 'fixed') => void;
+  overrideFee: string;         setOverrideFee: (v: string) => void;
+  overrideFeeType: 'percent' | 'fixed'; setOverrideFeeType: (v: 'percent' | 'fixed') => void;
   currency: string;
-}> = (p) => (
-  <div className="bg-white rounded-lg p-6 border border-slate-200 max-w-4xl mx-auto space-y-6">
-    <SectionTitle index={5} color="amber" label="Commission" subtitle="Set commission, agent and cashback details." />
+  breakdown: CommissionBreakdown;
+}> = (p) => {
+  const b = p.breakdown;
+  const hasMarkup = b.premiumMarkup > 0;
 
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-      <Field label="Base Commission %" required>
-        <input type="number" min="0" max="100" step="0.01" value={p.baseRate} onChange={e => p.setBaseRate(e.target.value)} className={inputClass} placeholder="e.g. 15" />
-      </Field>
+  return (
+    <div className="bg-white rounded-lg p-6 border border-slate-200 max-w-4xl mx-auto space-y-6">
+      <SectionTitle
+        index={5}
+        color="amber"
+        label="Commission"
+        subtitle="All rates apply to the basic premium. Markup flows straight into commission."
+      />
 
-      <Field
-        label="Discount to Client %"
-        hint={p.baseRate ? `Cannot exceed ${p.baseRate}%.` : undefined}
-      >
-        <input
-          type="number" min="0" max={p.baseRate || undefined} step="0.01"
-          value={p.discountPercent} onChange={e => p.setDiscountPercent(e.target.value)}
-          className={inputClass} placeholder="0"
-        />
-      </Field>
+      {hasMarkup && (
+        <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-[13px] text-blue-800 flex gap-2">
+          <Info className="w-4 h-4 shrink-0 mt-0.5" />
+          <div>
+            <strong>Additional commission from premium markup.</strong> This deal carries a markup of{' '}
+            <span className="font-semibold">{p.currency} {money(b.premiumMarkup)}</span>, which is added to both
+            gross and net commission below on top of the basic commission.
+          </div>
+        </div>
+      )}
 
-      <Field label="EF Commission %" hint="Behind-the-table commission paid by insurer.">
-        <input type="number" min="0" max="100" step="0.01" value={p.efCommissionPercent} onChange={e => p.setEfCommissionPercent(e.target.value)} className={inputClass} placeholder="0" />
-      </Field>
+      <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-2.5 text-[12px] text-slate-600 flex items-center justify-between">
+        <span className="font-medium">Basic Premium (all rates apply to this)</span>
+        <span className="font-mono font-bold text-slate-900">{p.currency} {money(b.basicPremium)}</span>
+      </div>
 
-      <Field label="PPh 23 Tax %" hint={`Defaults to ${DEFAULT_TAX_PERCENT}.`}>
-        <input type="number" min="0" max="100" step="0.01" value={p.taxPercent} onChange={e => p.setTaxPercent(e.target.value)} className={inputClass} placeholder={`${DEFAULT_TAX_PERCENT}`} />
-      </Field>
-    </div>
-
-    <div className="pt-4 border-t border-slate-100">
-      <h4 className="text-[13px] font-semibold text-slate-800 mb-3">Sales Agent &amp; Cashback (Optional)</h4>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        <Field label="Sales Agent Name">
-          <input type="text" value={p.agentName} onChange={e => p.setAgentName(e.target.value)} className={inputClass} placeholder="Agent name" />
+        <Field label="Base Commission %" required hint={`= ${p.currency} ${money(b.basicCommission)}`}>
+          <input type="number" min="0" max="100" step="0.01" value={p.baseRate}
+            onChange={e => p.setBaseRate(e.target.value)} className={inputClass} placeholder="e.g. 15" />
         </Field>
 
         <Field
-          label={p.agentCashbackType === 'percent' ? 'Cashback %' : `Cashback Amount (${p.currency})`}
-          hint="Cashback paid to the sales agent."
+          label="Discount to Client %"
+          hint={p.baseRate
+            ? `Cannot exceed ${p.baseRate}%. = ${p.currency} ${money(b.discountAmount)}`
+            : undefined}
         >
-          <div className="flex gap-2">
-            <div className="flex rounded-md overflow-hidden border border-slate-200 shrink-0">
-              {(['percent', 'fixed'] as const).map((t, idx) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => p.setAgentCashbackType(t)}
-                  className={cn(
-                    'px-3 py-2 text-[12px] font-semibold transition-colors',
-                    idx > 0 && 'border-l border-slate-200',
-                    p.agentCashbackType === t ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
-                  )}
-                  title={t === 'percent' ? 'Percent of premium' : 'Fixed amount'}
-                >
-                  {t === 'percent' ? '%' : p.currency}
-                </button>
-              ))}
-            </div>
-            <input
-              type="text"
-              value={p.agentCashbackType === 'fixed' ? formatNumber(p.agentCashback) : p.agentCashback}
-              onChange={e => {
-                const v = e.target.value;
-                p.setAgentCashback(p.agentCashbackType === 'fixed' ? formatNumber(v) : v.replace(/[^\d.]/g, ''));
-              }}
-              className={inputClass}
-              placeholder="0"
-            />
-          </div>
+          <input type="number" min="0" max={p.baseRate || undefined} step="0.01" value={p.discountPercent}
+            onChange={e => p.setDiscountPercent(e.target.value)} className={inputClass} placeholder="0" />
+        </Field>
+
+        <Field label="EF Commission %" hint={`Behind-the-table. = ${p.currency} ${money(b.efAmount)}`}>
+          <input type="number" min="0" max="100" step="0.01" value={p.efCommissionPercent}
+            onChange={e => p.setEfCommissionPercent(e.target.value)} className={inputClass} placeholder="0" />
+        </Field>
+
+        <Field label="Tax %" hint={`Charged on basic premium. = ${p.currency} ${money(b.taxAmount)}`}>
+          <input type="number" min="0" max="100" step="0.01" value={p.taxPercent}
+            onChange={e => p.setTaxPercent(e.target.value)} className={inputClass}
+            placeholder={`${DEFAULT_TAX_PERCENT}`} />
         </Field>
       </div>
+
+      {/* ---- Override fee ---- */}
+      <div className="pt-4 border-t border-slate-100">
+        <h4 className="text-[13px] font-semibold text-slate-800 mb-3">Override Fee (Optional)</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <Field label="Paid To">
+            <input type="text" value={p.agentName} onChange={e => p.setAgentName(e.target.value)}
+              className={inputClass} placeholder="Agent / introducer name" />
+          </Field>
+
+          <Field
+            label={p.overrideFeeType === 'percent' ? 'Override Fee %' : `Override Fee (${p.currency})`}
+            hint={`Deducted after net commission. = ${p.currency} ${money(b.overrideFee)}`}
+          >
+            <div className="flex gap-2">
+              <div className="flex rounded-md overflow-hidden border border-slate-200 shrink-0">
+                {(['percent', 'fixed'] as const).map((t, idx) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => p.setOverrideFeeType(t)}
+                    className={cn(
+                      'px-3 py-2 text-[12px] font-semibold transition-colors',
+                      idx > 0 && 'border-l border-slate-200',
+                      p.overrideFeeType === t ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                    )}
+                    title={t === 'percent' ? 'Percent of basic premium' : 'Fixed amount'}
+                  >
+                    {t === 'percent' ? '%' : p.currency}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                value={p.overrideFeeType === 'fixed' ? formatNumber(p.overrideFee) : p.overrideFee}
+                onChange={e => {
+                  const v = e.target.value;
+                  p.setOverrideFee(p.overrideFeeType === 'fixed' ? formatNumber(v) : v.replace(/[^\d.]/g, ''));
+                }}
+                className={inputClass}
+                placeholder="0"
+              />
+            </div>
+          </Field>
+        </div>
+      </div>
+
+      {/* ---- Breakdown ---- */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="rounded-lg border border-slate-200 overflow-hidden">
+          <div className="bg-slate-50 px-4 py-2 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+            Commission
+          </div>
+          <div className="p-4 space-y-2 text-[13px]">
+            <TotalLine label="Basic Commission" value={money(b.basicCommission)} />
+            <TotalLine label="Discount" value={`− ${money(b.discountAmount)}`} />
+            <TotalLine label="Tax" value={`− ${money(b.taxAmount)}`} />
+            <TotalLine label="Markup" value={`+ ${money(b.premiumMarkup)}`} accent="blue" />
+            <TotalLine label="EF Commission" value={`+ ${money(b.efAmount)}`} />
+            <div className="pt-2 mt-1 border-t border-slate-200 flex items-center justify-between">
+              <span className="text-[13px] font-bold text-slate-900">Total Net Commission</span>
+              <span className="text-[14px] font-bold font-mono text-emerald-700">
+                {money(b.totalNetCommission)}
+              </span>
+            </div>
+            {b.overrideFee > 0 && (
+              <>
+                <TotalLine label="Override Fee" value={`− ${money(b.overrideFee)}`} />
+                <div className="flex items-center justify-between">
+                  <span className="text-[12px] font-semibold text-slate-600">Net After Override</span>
+                  <span className="text-[13px] font-bold font-mono text-slate-900">
+                    {money(b.netAfterOverride)}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <Stat
+            label="Total Gross Commission"
+            value={`${p.currency} ${money(b.totalGrossCommission)}`}
+          />
+          <Stat
+            label="Premium to Insurer"
+            value={`${p.currency} ${money(b.premiumToInsurer)}`}
+          />
+          <div className="text-[11px] text-slate-500 leading-relaxed">
+            Gross = Basic Commission + Markup.<br />
+            Premium to Insurer = Basic Premium − Basic Commission + Stamp Duty + Tax.
+          </div>
+        </div>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 /* -------------------------------------------------------------------------- */
-/*                            Step 5: Preview                                 */
+/*                            Step 6: Preview                                 */
 /* -------------------------------------------------------------------------- */
 
 interface PreviewData {
@@ -1607,8 +1570,8 @@ interface PreviewData {
   productType: ProductType | '';
   sumInsured: string;
   currency: string;
-  premiumType: string;
-  premiumAmount: string;
+  premiumType: PremiumType;
+  premiumRatePercent: string;
   riskLocation: string;
   riskDetail: string;
   periodStart: string;
@@ -1619,22 +1582,9 @@ interface PreviewData {
   insuranceCompany: string;
   statusStage: DealStage;
   documents: DealDocuments;
-  baseRate: string;
-  discountPercent: string;
-  efCommissionPercent: string;
-  taxPercent: string;
   agentName: string;
-  agentCashback: string;
-  agentCashbackType: 'percent' | 'fixed';
-  socTemplate: SOCTemplate;
-  socCoverages: SOCCoverage[];
-  socDiscountPercent: number;
-  socAdminFee: number;
-  socPolicyFee: number;
-  socDeductible: string;
-  socSubTotal: number;
-  socTotalPremium: number;
-  premiumFromSoc: boolean;
+  overrideFeeType: 'percent' | 'fixed';
+  breakdown: CommissionBreakdown;
   primaryCoverNoteNumber: string;
   extraLines: {
     id: string;
@@ -1644,7 +1594,6 @@ interface PreviewData {
     coverNoteNumber: string;
   }[];
   allLineSumInsured: number;
-  allLinePremium: number;
 }
 
 const StepPreview: React.FC<{
@@ -1676,7 +1625,10 @@ const StepPreview: React.FC<{
           <PreviewRow label="Product" value={data.productType || '—'} />
           <PreviewRow label="Insurance Company" value={data.insuranceCompany || '—'} />
           <PreviewRow label="Sum Insured" value={data.sumInsured ? `${data.currency} ${data.sumInsured}` : '—'} />
-          <PreviewRow label="Premium" value={data.premiumAmount ? `${data.currency} ${data.premiumAmount} (${data.premiumType})` : '—'} />
+          <PreviewRow
+            label="Total Premium Payable"
+            value={`${data.currency} ${money(data.breakdown.totalPremiumPayable)}`}
+          />
           <PreviewRow label="Period" value={data.periodStart && data.periodEnd ? `${data.periodStart} → ${data.periodEnd}` : '—'} />
           <PreviewRow label="Risk Location" value={data.riskLocation || '—'} multiline />
           <PreviewRow label="Risk Detail" value={data.riskDetail || '—'} multiline />
@@ -1745,46 +1697,31 @@ const StepPreview: React.FC<{
         </div>
       </PreviewBlock>
 
-      <PreviewBlock title="Premium Calculation (SOC)">
+      <PreviewBlock title="Premium Calculation">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-          <Stat label="Template" value={data.socTemplate} />
-          <Stat label="Sub Total" value={`${data.currency} ${fmtAmount(data.socSubTotal)}`} />
-          <Stat label="Discount" value={`${data.socDiscountPercent || 0}%`} />
-          <Stat label="Total Premium" value={`${data.currency} ${fmtAmount(data.socTotalPremium)}`} />
+          <Stat
+            label="Premium Type"
+            value={data.premiumType === 'Percentage from Sum Insured'
+              ? `${data.premiumRatePercent || 0}% of SI`
+              : 'Fixed Amount'}
+          />
+          <Stat label="Basic Premium" value={`${data.currency} ${money(data.breakdown.basicPremium)}`} />
+          <Stat label="Markup" value={`${data.currency} ${money(data.breakdown.premiumMarkup)}`} />
+          <Stat label="Total Payable" value={`${data.currency} ${money(data.breakdown.totalPremiumPayable)}`} />
         </div>
-        {data.socCoverages.length > 0 && data.socTotalPremium > 0 ? (
-          <div className="overflow-hidden rounded-md border border-slate-200">
-            <table className="w-full text-[12px]">
-              <thead className="bg-slate-50 text-slate-600">
-                <tr>
-                  <th className="px-3 py-1.5 text-left font-semibold">Coverage</th>
-                  <th className="px-3 py-1.5 text-right font-semibold w-24">Rate</th>
-                  <th className="px-3 py-1.5 text-right font-semibold w-32">Amount</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {data.socCoverages
-                  .filter(c => c.amount > 0 || c.name.trim() !== '')
-                  .map(c => (
-                    <tr key={c.id}>
-                      <td className="px-3 py-1.5 text-slate-700">{c.name || '—'}</td>
-                      <td className="px-3 py-1.5 text-right font-mono text-slate-600">
-                        {c.rate}{c.rateType === 'percentage' ? '%' : ''}
-                      </td>
-                      <td className="px-3 py-1.5 text-right font-mono text-slate-800">{fmtAmount(c.amount)}</td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 text-[12px] text-slate-600">
+          <div className="flex justify-between py-1">
+            <span>Admin Fee</span>
+            <span className="font-mono text-slate-800">{money(data.breakdown.adminFee)}</span>
           </div>
-        ) : (
-          <p className="text-[12px] text-slate-400 italic">No SOC coverages entered.</p>
-        )}
-        <div className="mt-2 text-[11px] text-slate-500">
-          {data.premiumFromSoc
-            ? 'This total drives the deal\'s Premium Amount.'
-            : 'SOC stored as reference only — Premium Amount was entered manually.'}
-          {data.socDeductible && <> · Deductible: <span className="text-slate-700">{data.socDeductible}</span></>}
+          <div className="flex justify-between py-1">
+            <span>Policy Fee</span>
+            <span className="font-mono text-slate-800">{money(data.breakdown.policyFee)}</span>
+          </div>
+          <div className="flex justify-between py-1">
+            <span>Stamp Duty</span>
+            <span className="font-mono text-slate-800">{money(data.breakdown.stampDuty)}</span>
+          </div>
         </div>
       </PreviewBlock>
 
@@ -1805,22 +1742,39 @@ const StepPreview: React.FC<{
       </PreviewBlock>
 
       <PreviewBlock title="Commission">
+        {data.breakdown.premiumMarkup > 0 && (
+          <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-[12px] text-blue-800">
+            Includes additional commission from a premium markup of{' '}
+            <span className="font-semibold">{data.currency} {money(data.breakdown.premiumMarkup)}</span>.
+          </div>
+        )}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Stat label="Base" value={`${data.baseRate || 0}%`} />
-          <Stat label="Discount" value={`${data.discountPercent || 0}%`} />
-          <Stat label="EF" value={`${data.efCommissionPercent || 0}%`} />
-          <Stat label="Tax (PPh 23)" value={`${data.taxPercent || DEFAULT_TAX_PERCENT}%`} />
+          <Stat label={`Base (${data.breakdown.baseRate}%)`} value={money(data.breakdown.basicCommission)} />
+          <Stat label={`Discount (${data.breakdown.discountPercent}%)`} value={`− ${money(data.breakdown.discountAmount)}`} />
+          <Stat label={`EF (${data.breakdown.efPercent}%)`} value={`+ ${money(data.breakdown.efAmount)}`} />
+          <Stat label={`Tax (${data.breakdown.taxPercent}%)`} value={`− ${money(data.breakdown.taxAmount)}`} />
         </div>
-        {(data.agentName || data.agentCashback) && (
-          <div className="mt-3 pt-3 border-t border-slate-100 text-[13px] text-slate-700">
-            <span className="font-semibold">{data.agentName || 'Agent'}</span>
-            {data.agentCashback && (
+
+        <div className="mt-3 pt-3 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <Stat label="Total Gross Commission" value={`${data.currency} ${money(data.breakdown.totalGrossCommission)}`} />
+          <Stat label="Total Net Commission" value={`${data.currency} ${money(data.breakdown.totalNetCommission)}`} />
+          <Stat label="Premium to Insurer" value={`${data.currency} ${money(data.breakdown.premiumToInsurer)}`} />
+        </div>
+
+        {(data.agentName || data.breakdown.overrideFee > 0) && (
+          <div className="mt-3 pt-3 border-t border-slate-100 text-[13px] text-slate-700 flex items-center justify-between">
+            <span>
+              <span className="font-semibold">{data.agentName || 'Override'}</span>
               <span className="text-slate-500 ml-2">
-                Cashback: {data.agentCashbackType === 'percent'
-                  ? `${data.agentCashback}%`
-                  : `${data.currency} ${data.agentCashback}`}
+                Override Fee{data.overrideFeeType === 'percent' ? ' (% of basic premium)' : ''}
               </span>
-            )}
+            </span>
+            <span className="font-mono">
+              − {data.currency} {money(data.breakdown.overrideFee)}
+              <span className="text-slate-400 ml-2">
+                → net {money(data.breakdown.netAfterOverride)}
+              </span>
+            </span>
           </div>
         )}
       </PreviewBlock>
