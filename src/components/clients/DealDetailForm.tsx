@@ -1153,24 +1153,17 @@ const StepPremium: React.FC<StepPremiumProps> = (p) => {
       />
 
       {/* ---- Premium type ---- */}
-      <Field label="Premium Type" required>
-        <div className="flex rounded-md overflow-hidden border border-slate-200">
-          {PREMIUM_TYPES.map((opt, idx) => (
-            <button
-              key={opt}
-              type="button"
-              onClick={() => p.setPremiumType(opt)}
-              className={cn(
-                'flex-1 px-3 py-2 text-[13px] font-semibold transition-colors',
-                idx > 0 && 'border-l border-slate-200',
-                p.premiumType === opt ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
-              )}
-            >
-              {opt}
-            </button>
-          ))}
-        </div>
-      </Field>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <Field label="Premium Type" required hint="How the basic premium is arrived at.">
+          <select
+            value={p.premiumType}
+            onChange={e => p.setPremiumType(e.target.value as PremiumType)}
+            className={inputClass}
+          >
+            {PREMIUM_TYPES.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+          </select>
+        </Field>
+      </div>
 
       {/* ---- Basic premium ---- */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -1270,12 +1263,19 @@ const StepPremium: React.FC<StepPremiumProps> = (p) => {
           {b.adminFee > 0 && <TotalLine label="Admin Fee" value={`+ ${money(b.adminFee)}`} />}
           {b.policyFee > 0 && <TotalLine label="Policy Fee" value={`+ ${money(b.policyFee)}`} />}
           {b.stampDuty > 0 && <TotalLine label="Stamp Duty" value={`+ ${money(b.stampDuty)}`} />}
-          <div className="pt-2 mt-1 border-t border-slate-200 flex items-center justify-between">
-            <span className="text-[14px] font-bold text-slate-900">Total Premium Payable</span>
-            <span className="text-[15px] font-bold font-mono text-slate-900">
-              {p.currency} {money(b.totalPremiumPayable)}
-            </span>
+        </div>
+
+        {/* What the client is invoiced */}
+        <div className="bg-emerald-50 border-t border-emerald-200 px-4 py-3 flex items-center justify-between">
+          <div>
+            <div className="text-[13px] font-bold text-emerald-900">Premium Due to Insured (Client)</div>
+            <div className="text-[11px] text-emerald-700 mt-0.5">
+              Basic Premium + Markup + Admin Fee + Policy Fee + Stamp Duty
+            </div>
           </div>
+          <span className="text-[16px] font-bold font-mono text-emerald-900">
+            {p.currency} {money(b.totalPremiumPayable)}
+          </span>
         </div>
       </div>
 
@@ -1545,13 +1545,31 @@ const StepCommission: React.FC<{
             label="Total Gross Commission"
             value={`${p.currency} ${money(b.totalGrossCommission)}`}
           />
-          <Stat
-            label="Premium to Insurer"
-            value={`${p.currency} ${money(b.premiumToInsurer)}`}
-          />
+
+          {/* Both sides of the money flow, side by side */}
+          <div className="rounded-md border border-slate-200 overflow-hidden">
+            <div className="bg-emerald-50 border-b border-emerald-200 px-3 py-2.5 flex items-center justify-between">
+              <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider">
+                Premium Due to Insured
+              </span>
+              <span className="text-[13px] font-bold font-mono text-emerald-900">
+                {p.currency} {money(b.totalPremiumPayable)}
+              </span>
+            </div>
+            <div className="bg-slate-50 px-3 py-2.5 flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                Premium to Insurer
+              </span>
+              <span className="text-[13px] font-bold font-mono text-slate-900">
+                {p.currency} {money(b.premiumToInsurer)}
+              </span>
+            </div>
+          </div>
+
           <div className="text-[11px] text-slate-500 leading-relaxed">
             Gross = Basic Commission + Markup.<br />
-            Premium to Insurer = Basic Premium − Basic Commission + Stamp Duty + Tax.
+            Due to Insured = Basic Premium + Markup + Fees + Stamp Duty.<br />
+            To Insurer = Basic Premium − Basic Commission + Stamp Duty + Tax.
           </div>
         </div>
       </div>
@@ -1626,7 +1644,7 @@ const StepPreview: React.FC<{
           <PreviewRow label="Insurance Company" value={data.insuranceCompany || '—'} />
           <PreviewRow label="Sum Insured" value={data.sumInsured ? `${data.currency} ${data.sumInsured}` : '—'} />
           <PreviewRow
-            label="Total Premium Payable"
+            label="Premium Due to Insured"
             value={`${data.currency} ${money(data.breakdown.totalPremiumPayable)}`}
           />
           <PreviewRow label="Period" value={data.periodStart && data.periodEnd ? `${data.periodStart} → ${data.periodEnd}` : '—'} />
@@ -1707,7 +1725,7 @@ const StepPreview: React.FC<{
           />
           <Stat label="Basic Premium" value={`${data.currency} ${money(data.breakdown.basicPremium)}`} />
           <Stat label="Markup" value={`${data.currency} ${money(data.breakdown.premiumMarkup)}`} />
-          <Stat label="Total Payable" value={`${data.currency} ${money(data.breakdown.totalPremiumPayable)}`} />
+          <Stat label="Due to Insured" value={`${data.currency} ${money(data.breakdown.totalPremiumPayable)}`} />
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 text-[12px] text-slate-600">
           <div className="flex justify-between py-1">
