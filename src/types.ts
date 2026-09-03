@@ -73,8 +73,69 @@ export interface DealCommission {
   agentCashbackType?: 'percent' | 'fixed';
 }
 
-export type ProductType = 'General Insurance' | 'Marine Cargo' | 'Custom';
-export const PRODUCT_TYPES: ProductType[] = ['General Insurance', 'Marine Cargo', 'Custom'];
+/**
+ * Product category. Picking one narrows the Type of Insurance options —
+ * see PRODUCT_INSURANCE_TYPES below. Product and type are chosen together
+ * as a two-level cascade rather than as two independent fields.
+ */
+export type ProductType =
+  | 'General Insurance'
+  | 'Marine Cargo'
+  | 'Financial'
+  | 'Health'
+  | 'Motor Vehicle'
+  | 'Others';
+
+export const PRODUCT_TYPES: ProductType[] = [
+  'General Insurance',
+  'Marine Cargo',
+  'Financial',
+  'Health',
+  'Motor Vehicle',
+  'Others',
+];
+
+/**
+ * Types available under General Insurance — carried over verbatim from the
+ * flat list that used to be the only Type of Insurance dropdown.
+ */
+export const GENERAL_INSURANCE_TYPES: string[] = [
+  'Property All Risk',
+  'Industrial All Risk',
+  'Fire Insurance',
+  'Earthquake Insurance',
+  'Marine Cargo',
+  'Marine Hull',
+  'Motor Vehicle',
+  'Heavy Equipment',
+  'Liability Insurance',
+  'Directors & Officers Liability',
+  'Professional Indemnity',
+  'Money Insurance',
+  'Fidelity Guarantee',
+  'Personal Accident',
+  'Group Term Life',
+  'Health Insurance',
+  'Travel Insurance',
+  'Cyber Insurance',
+  'Credit Insurance',
+  'Surety Bond',
+  'Other',
+];
+
+/** Type of Insurance options for each product category. */
+export const PRODUCT_INSURANCE_TYPES: Record<ProductType, string[]> = {
+  'General Insurance': GENERAL_INSURANCE_TYPES,
+  'Marine Cargo': ['Single Shipment Certificate', 'Declaration Bulk'],
+  'Financial': ['Credit Insurance', 'Bank Guarantee', 'Credit Life'],
+  'Health': ['Individual Health', 'Group Health', 'Personal Accident'],
+  'Motor Vehicle': ['Comprehensive', 'Total Loss Only'],
+  'Others': ['Trade Credit', 'Construction All Risk', 'Electrical All Risk'],
+};
+
+/** Types valid for a product, or an empty list when no product is chosen yet. */
+export const insuranceTypesForProduct = (product?: ProductType | ''): string[] =>
+  product ? (PRODUCT_INSURANCE_TYPES[product] ?? []) : [];
 
 export type DealApprovalStatus =
   | 'Draft'

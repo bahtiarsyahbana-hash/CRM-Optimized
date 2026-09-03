@@ -14,9 +14,14 @@ interface Props {
 
 export const SOCManagerModal = ({ deal, client, onClose }: Props) => {
   const { updateDeal } = useData();
+  // The product category is authoritative — under the Motor Vehicle product the
+  // types are "Comprehensive" / "Total Loss Only", which don't contain the word
+  // "motor". The string check stays as a fallback for pre-cascade deals.
   const [templateType, setTemplateType] = useState<'Motor Vehicle' | 'General' | 'Other'>(
     deal.socDetails?.templateType ||
-    (deal.typeOfInsurance?.toLowerCase().includes('motor') || deal.typeOfInsurance?.toLowerCase().includes('kendaraan') ? 'Motor Vehicle' : 'General')
+    (deal.productType === 'Motor Vehicle' ? 'Motor Vehicle'
+      : deal.productType ? 'General'
+      : (deal.typeOfInsurance?.toLowerCase().includes('motor') || deal.typeOfInsurance?.toLowerCase().includes('kendaraan') ? 'Motor Vehicle' : 'General'))
   );
 
   const [coverages, setCoverages] = useState<SOCCoverage[]>([]);

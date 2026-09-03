@@ -1,4 +1,4 @@
-import { Deal, DealCommission, Client, LineOfBusiness } from '../types';
+import { Deal, DealCommission, Client, LineOfBusiness, ProductType } from '../types';
 
 /**
  * Default commission rate (%) by Line of Business.
@@ -17,13 +17,21 @@ export const COMMISSION_DEFAULT_BY_LOB: Record<LineOfBusiness, number> = {
 export const DEFAULT_TAX_PERCENT = 2;
 
 /**
- * Determine the default commission rate for a deal based on the client's LOB
- * and the deal's type of insurance. Motor Vehicle is special-cased to 25% per OJK.
+ * Determine the default commission rate for a deal based on the client's LOB,
+ * the product category and the deal's type of insurance. Motor Vehicle is
+ * special-cased to 25% per OJK.
+ *
+ * The product category is the reliable signal — under the Motor Vehicle
+ * product the types are "Comprehensive" / "Total Loss Only", which don't
+ * contain the word "motor". The string heuristic is kept as a fallback for
+ * deals recorded before products became a cascade.
  */
 export function defaultCommissionRate(
   client: Client | undefined,
   typeOfInsurance: string,
+  productType?: ProductType | '',
 ): number {
+  if (productType === 'Motor Vehicle') return 25;
   const t = (typeOfInsurance || '').toLowerCase();
   if (t.includes('motor') || t.includes('vehicle') || t === 'mv') return 25;
   if (!client) return 15;

@@ -7,6 +7,7 @@ import {
   PaymentStatus,
   ProductType,
   PRODUCT_TYPES,
+  insuranceTypesForProduct,
   DealApprovalStatus,
   DealDocuments,
   SOCCoverage,
@@ -114,8 +115,16 @@ const calcCoverageAmount = (cov: SOCCoverage, sumInsured: number): number => {
   return cov.rateType === 'percentage' ? (rate / 100) * sumInsured : rate;
 };
 
-const guessTemplateFromInsuranceType = (insuranceType: string): SOCTemplate => {
-  const t = insuranceType.toLowerCase();
+/**
+ * Pick the SOC coverage template. The product category is authoritative —
+ * under the Motor Vehicle product the types are "Comprehensive" / "Total Loss
+ * Only", which no longer contain the word "motor". The string heuristic
+ * remains as a fallback for deals saved before products became a cascade.
+ */
+const guessSocTemplate = (productType: ProductType | '' | undefined, insuranceType: string): SOCTemplate => {
+  if (productType === 'Motor Vehicle') return 'Motor Vehicle';
+  if (productType) return 'General';
+  const t = (insuranceType || '').toLowerCase();
   if (t.includes('motor') || t.includes('kendaraan') || t.includes('vehicle')) return 'Motor Vehicle';
   return 'General';
 };
@@ -228,6 +237,26 @@ export const DealDetailForm = ({
 
   const isMultiProductMode = extraLines.length > 0;
 
+  /** Types available for the currently selected product category. */
+  const availableInsuranceTypes = useMemo(
+    () => insuranceTypesForProduct(productType),
+    [productType]
+  );
+
+  /**
+   * Changing the product category invalidates any insurance type that doesn't
+   * belong to the new one — on the primary product and on every extra line.
+   * Anything still valid is kept so switching back and forth isn't destructive.
+   */
+  const handleProductTypeChange = (next: ProductType | '') => {
+    setProductType(next);
+    const valid = insuranceTypesForProduct(next);
+    setTypeOfInsurance(prev => (prev && valid.includes(prev) ? prev : ''));
+    setExtraLines(prev =>
+      prev.map(l => (l.productName && valid.includes(l.productName) ? l : { ...l, productName: '' }))
+    );
+  };
+
   const addProductLine = () => {
     setExtraLines(prev => [
       ...prev,
@@ -257,14 +286,14 @@ export const DealDetailForm = ({
   /* ----- Step 3: Premium calculation (SOC-style) ----- */
   const [socTemplate, setSocTemplate] = useState<SOCTemplate>(
     (deal?.socDetails?.templateType as SOCTemplate)
-      || guessTemplateFromInsuranceType(deal?.typeOfInsurance || '')
+      || guessSocTemplate(deal?.productType, deal?.typeOfInsurance || '')
   );
   const [socCoverages, setSocCoverages] = useState<SOCCoverage[]>(
     deal?.socDetails?.coverages?.length
       ? deal.socDetails.coverages
       : buildTemplateCoverages(
           (deal?.socDetails?.templateType as SOCTemplate)
-            || guessTemplateFromInsuranceType(deal?.typeOfInsurance || '')
+            || guessSocTemplate(deal?.productType, deal?.typeOfInsurance || '')
         )
   );
   const [socDiscountPercent, setSocDiscountPercent] = useState<number>(deal?.socDetails?.discountPercent ?? 0);
@@ -338,10 +367,10 @@ export const DealDetailForm = ({
   // Auto-suggest base commission once a Type of Insurance is chosen.
   useEffect(() => {
     if (typeOfInsurance && !baseRate) {
-      setBaseRate(String(defaultCommissionRate(selectedClient || undefined, typeOfInsurance)));
+      setBaseRate(String(defaultCommissionRate(selectedClient || undefined, typeOfInsurance, productType)));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [typeOfInsurance, selectedClient?.id]);
+  }, [typeOfInsurance, productType, selectedClient?.id]);
 
   /* ----- Step 5: Preview / approval ----- */
   // Pre-existing invoicing fields are preserved silently — out of scope of this wizard,
@@ -629,7 +658,8 @@ export const DealDetailForm = ({
               {...{
                 dealType, setDealType,
                 typeOfInsurance, setTypeOfInsurance,
-                productType, setProductType,
+                productType, setProductType: handleProductTypeChange,
+                availableInsuranceTypes,
                 sumInsured, setSumInsured,
                 currency, setCurrency,
                 premiumType, setPremiumType,
@@ -869,6 +899,8 @@ interface StepCoverageProps {
   dealType: DealType;                                 setDealType: (v: DealType) => void;
   typeOfInsurance: string;                            setTypeOfInsurance: (v: string) => void;
   productType: ProductType | '';                      setProductType: (v: ProductType | '') => void;
+  /** Type of Insurance options for the selected product category. */
+  availableInsuranceTypes: string[];
   sumInsured: string;                                 setSumInsured: (v: string) => void;
   currency: string;                                   setCurrency: (v: string) => void;
   premiumType: string;                                setPremiumType: (v: string) => void;
@@ -903,13 +935,8 @@ interface StepCoverageProps {
 }
 
 const StepCoverage: React.FC<StepCoverageProps> = (p) => {
-  const insuranceTypeOptions = [
-    'Property All Risk', 'Industrial All Risk', 'Fire Insurance', 'Earthquake Insurance',
-    'Marine Cargo', 'Marine Hull', 'Motor Vehicle', 'Heavy Equipment', 'Liability Insurance',
-    'Directors & Officers Liability', 'Professional Indemnity', 'Money Insurance',
-    'Fidelity Guarantee', 'Personal Accident', 'Group Term Life', 'Health Insurance',
-    'Travel Insurance', 'Cyber Insurance', 'Credit Insurance', 'Surety Bond', 'Other',
-  ];
+  const insuranceTypeOptions = p.availableInsuranceTypes;
+  const hasProduct = !!p.productType;
   const currencyOptions = ['IDR', 'USD', 'CNY', 'MYR', 'JPY', 'EUR'];
 
   return (
@@ -936,17 +963,30 @@ const StepCoverage: React.FC<StepCoverageProps> = (p) => {
           </div>
         </Field>
 
-        <Field label="Type of Insurance" required>
-          <select value={p.typeOfInsurance} onChange={e => p.setTypeOfInsurance(e.target.value)} className={inputClass}>
-            <option value="">Select Insurance Type</option>
-            {insuranceTypeOptions.map(o => <option key={o} value={o}>{o}</option>)}
+        <Field label="Product" required hint="Choosing a product narrows the Type of Insurance options.">
+          <select
+            value={p.productType}
+            onChange={e => p.setProductType(e.target.value as ProductType | '')}
+            className={inputClass}
+          >
+            <option value="">Select Product</option>
+            {PRODUCT_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
           </select>
         </Field>
 
-        <Field label="Product Type" required>
-          <select value={p.productType} onChange={e => p.setProductType(e.target.value as ProductType | '')} className={inputClass}>
-            <option value="">Select Product Type</option>
-            {PRODUCT_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
+        <Field
+          label="Type of Insurance"
+          required
+          hint={hasProduct ? undefined : 'Select a product first.'}
+        >
+          <select
+            value={p.typeOfInsurance}
+            onChange={e => p.setTypeOfInsurance(e.target.value)}
+            disabled={!hasProduct}
+            className={cn(inputClass, !hasProduct && 'bg-slate-50 text-slate-400 cursor-not-allowed')}
+          >
+            <option value="">{hasProduct ? 'Select Insurance Type' : 'Select a product first'}</option>
+            {insuranceTypeOptions.map(o => <option key={o} value={o}>{o}</option>)}
           </select>
         </Field>
 
@@ -1021,8 +1061,9 @@ const StepCoverage: React.FC<StepCoverageProps> = (p) => {
             <h4 className="text-[13px] font-semibold text-slate-800">Additional Products</h4>
             <p className="text-[11px] text-slate-500">
               Add other coverages on the same placement — e.g. Property All Risk + Earthquake + MB + PL.
-              Each product can carry its own cover note number; everything else (period, insurer, PIC,
-              invoice, approval) stays shared.
+              All lines draw from the <span className="font-semibold">{p.productType || 'selected'}</span> product.
+              Each carries its own cover note number; everything else (period, insurer, PIC, invoice,
+              approval) stays shared.
             </p>
           </div>
           <button
@@ -1077,9 +1118,10 @@ const StepCoverage: React.FC<StepCoverageProps> = (p) => {
                     <select
                       value={line.productName}
                       onChange={e => p.updateProductLine(line.id, { productName: e.target.value })}
-                      className={inputClass}
+                      disabled={!hasProduct}
+                      className={cn(inputClass, !hasProduct && 'bg-slate-50 text-slate-400 cursor-not-allowed')}
                     >
-                      <option value="">Select Insurance Type</option>
+                      <option value="">{hasProduct ? 'Select Insurance Type' : 'Select a product first'}</option>
                       {insuranceTypeOptions.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
                   </Field>
@@ -1631,7 +1673,7 @@ const StepPreview: React.FC<{
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
           <PreviewRow label="Deal Type" value={data.dealType} />
           <PreviewRow label="Type of Insurance" value={data.typeOfInsurance} />
-          <PreviewRow label="Product Type" value={data.productType || '—'} />
+          <PreviewRow label="Product" value={data.productType || '—'} />
           <PreviewRow label="Insurance Company" value={data.insuranceCompany || '—'} />
           <PreviewRow label="Sum Insured" value={data.sumInsured ? `${data.currency} ${data.sumInsured}` : '—'} />
           <PreviewRow label="Premium" value={data.premiumAmount ? `${data.currency} ${data.premiumAmount} (${data.premiumType})` : '—'} />
