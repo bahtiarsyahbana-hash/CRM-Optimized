@@ -1457,7 +1457,7 @@ const StepCommission: React.FC<{
 
         <Field
           label="Tax %"
-          hint={`On basic commission less discount (${p.currency} ${money(b.taxableCommission)}) = ${p.currency} ${money(b.taxAmount)}`}
+          hint={`Net Basic Commission (${p.currency} ${money(b.netBasicCommission)}) × ${p.taxPercent || DEFAULT_TAX_PERCENT}% = ${p.currency} ${money(b.taxAmount)}`}
         >
           <input type="number" min="0" max="100" step="0.01" value={p.taxPercent}
             onChange={e => p.setTaxPercent(e.target.value)} className={inputClass}
@@ -1520,7 +1520,11 @@ const StepCommission: React.FC<{
           <div className="p-4 space-y-2 text-[13px]">
             <TotalLine label="Basic Commission" value={money(b.basicCommission)} />
             <TotalLine label="Discount" value={`− ${money(b.discountAmount)}`} />
-            <TotalLine label="Tax" value={`− ${money(b.taxAmount)}`} />
+            <div className="flex items-center justify-between border-y border-dashed border-slate-200 py-1.5 my-1">
+              <span className="font-semibold text-slate-700">Net Basic Commission</span>
+              <span className="font-mono font-semibold text-slate-900">{money(b.netBasicCommission)}</span>
+            </div>
+            <TotalLine label={`Tax (${b.taxPercent}% of net)`} value={`− ${money(b.taxAmount)}`} />
             <TotalLine label="Markup" value={`+ ${money(b.premiumMarkup)}`} accent="blue" />
             <TotalLine label="EF Commission" value={`+ ${money(b.efAmount)}`} />
             <div className="pt-2 mt-1 border-t border-slate-200 flex items-center justify-between">
@@ -1570,7 +1574,8 @@ const StepCommission: React.FC<{
           </div>
 
           <div className="text-[11px] text-slate-500 leading-relaxed">
-            Tax = (Basic Commission − Discount) × Tax%.<br />
+            Net Basic Commission = Basic Commission − Discount.<br />
+            Tax = Net Basic Commission × Tax%.<br />
             Gross = Basic Commission + Markup.<br />
             Due to Insured = Basic Premium + Markup + Fees + Stamp Duty.<br />
             To Insurer = Basic Premium − Basic Commission + Stamp Duty + Tax.
@@ -1775,7 +1780,7 @@ const StepPreview: React.FC<{
           <Stat label={`Discount (${data.breakdown.discountPercent}%)`} value={`− ${money(data.breakdown.discountAmount)}`} />
           <Stat label={`EF (${data.breakdown.efPercent}%)`} value={`+ ${money(data.breakdown.efAmount)}`} />
           <Stat
-            label={`Tax (${data.breakdown.taxPercent}% of ${money(data.breakdown.taxableCommission)})`}
+            label={`Tax (${data.breakdown.taxPercent}% of Net Basic Commission)`}
             value={`− ${money(data.breakdown.taxAmount)}`}
           />
         </div>

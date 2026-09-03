@@ -67,8 +67,8 @@ export interface CommissionBreakdown {
   basicCommission: number;
   discountAmount: number;
   efAmount: number;
-  /** basicCommission − discountAmount — the base the tax is charged on. */
-  taxableCommission: number;
+  /** basicCommission − discountAmount. The base the tax is charged on. */
+  netBasicCommission: number;
   taxAmount: number;
 
   /* ---- Outputs ---- */
@@ -90,23 +90,30 @@ export interface CommissionBreakdown {
  *
  * Commission, discount, EF and the override fee are all percentages of the
  * **basic premium** — the risk premium before markup and fees. Tax is the
- * exception: it is charged on the commission actually earned, i.e. the basic
- * commission net of the discount given away.
+ * exception: it is charged on the **net basic commission**, i.e. the basic
+ * commission after the discount given away.
  *
- *   basicCommission   = basicPremium × baseRate%
- *   discountAmount    = basicPremium × discountPercent%
- *   efAmount          = basicPremium × efPercent%
- *   taxAmount         = (basicCommission − discountAmount) × taxPercent%
+ *   basicCommission    = basicPremium × baseRate%
+ *   discountAmount     = basicPremium × discountPercent%
+ *   efAmount           = basicPremium × efPercent%
+ *   netBasicCommission = basicCommission − discountAmount
+ *   taxAmount          = netBasicCommission × taxPercent%
  *
  *   premiumToInsurer     = basicPremium − basicCommission + stampDuty + tax
  *   totalGrossCommission = basicCommission + markup
  *   totalNetCommission   = basicCommission − discount − tax + markup + ef
  *
+ * Worked example — basic premium 20,000,000 at 15% base and 10% discount:
+ *   basicCommission    = 3,000,000
+ *   discountAmount     = 2,000,000
+ *   netBasicCommission = 1,000,000
+ *   taxAmount (2%)     =    20,000
+ *
  * The markup is retained entirely by the broker — it never reaches the
  * insurer — which is why it lands in commission rather than in premium.
  *
- * Discount is capped at the base rate upstream, so the taxable base cannot
- * go negative; it is floored at zero here regardless.
+ * Discount is capped at the base rate upstream, so the net basic commission
+ * cannot go negative; it is floored at zero here regardless.
  */
 export function computeCommission(
   premium: PremiumInputs,
@@ -122,9 +129,9 @@ export function computeCommission(
   const basicCommission = basicPremium * (baseRate / 100);
   const discountAmount = basicPremium * (discountPercent / 100);
   const efAmount = basicPremium * (efPercent / 100);
-  // Tax is charged on the commission actually earned, not on the premium.
-  const taxableCommission = Math.max(0, basicCommission - discountAmount);
-  const taxAmount = taxableCommission * (taxPercent / 100);
+  // Tax is charged on the net basic commission, not on the premium.
+  const netBasicCommission = Math.max(0, basicCommission - discountAmount);
+  const taxAmount = netBasicCommission * (taxPercent / 100);
 
   const totalPremiumPayable = basicPremium + premiumMarkup + adminFee + policyFee + stampDuty;
   const premiumToInsurer = basicPremium - basicCommission + stampDuty + taxAmount;
@@ -140,7 +147,7 @@ export function computeCommission(
     basicPremium, premiumMarkup, adminFee, policyFee, stampDuty,
     totalPremiumPayable,
     baseRate, discountPercent, efPercent, taxPercent,
-    basicCommission, discountAmount, efAmount, taxableCommission, taxAmount,
+    basicCommission, discountAmount, efAmount, netBasicCommission, taxAmount,
     premiumToInsurer, totalGrossCommission, totalNetCommission,
     overrideFee,
     netAfterOverride: totalNetCommission - overrideFee,
