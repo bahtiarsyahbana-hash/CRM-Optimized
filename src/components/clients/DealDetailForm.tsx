@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { INSURANCE_COMPANIES } from '../../constants/insuranceCompanies';
+import { isRenewal } from '../../utils/dealTrack';
 import { cn } from '../../lib/utils';
 
 /* -------------------------------------------------------------------------- */
@@ -291,8 +292,8 @@ export const DealDetailForm = ({
   const [statusStage, setStatusStage] = useState<DealStage>(deal?.statusStage || 'Leads');
   const [documents, setDocuments] = useState<DealDocuments>(deal?.documents || {});
 
-  // statusStage available options depend on dealType
-  const statusStageOptions: DealStage[] = ['Renewal', 'Existing Client Update'].includes(dealType)
+  // Renewals skip the Leads stage — they start already on the books.
+  const statusStageOptions: DealStage[] = isRenewal(dealType)
     ? ['Policy On Progress', 'Data Collection', 'Quote', 'Nego', 'Bind / Closed Won', 'Lost']
     : ['Leads', 'Data Collection', 'Quote', 'Nego', 'Bind / Closed Won', 'Policy On Progress', 'Lost'];
 

@@ -3,6 +3,7 @@ import { useData } from '../../context/DataContext';
 import { Deal, DealStage, DealStageLogEntry } from '../../types';
 import { ArrowLeft, Building2, CheckCircle2, Circle, Clock, MessageSquareText, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { isRenewal } from '../../utils/dealTrack';
 import toast from 'react-hot-toast';
 
 interface Props {
@@ -29,8 +30,7 @@ export const DealJourneyView: React.FC<Props> = ({ deal: initialDeal, onBack }) 
   const deal = deals.find(d => d.id === initialDeal.id) || initialDeal;
   const client = clients.find(c => c.id === deal.clientId);
 
-  const isRenewalTrack = ['Renewal', 'Existing Client Update'].includes(deal.dealType);
-  const stages = isRenewalTrack ? STAGES_RENEWAL : STAGES_NEW;
+  const stages = isRenewal(deal.dealType) ? STAGES_RENEWAL : STAGES_NEW;
 
   const currentIdx = stages.indexOf(deal.statusStage);
   const sortedLog: DealStageLogEntry[] = useMemo(
