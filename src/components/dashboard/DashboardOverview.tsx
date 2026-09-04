@@ -147,18 +147,6 @@ export const DashboardOverview = ({ navigate }: { navigate: Navigate }) => {
           </div>
         </div>
 
-        {/* Reporting widgets — fixed grid in phase 1, per-user layout in phase 2. */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          {widgets.map(w => {
-            const Component = w.component;
-            return (
-              <div key={w.id} className={cn(w.defaultSpan === 2 && 'md:col-span-2')}>
-                <Component navigate={navigate} />
-              </div>
-            );
-          })}
-        </div>
-
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
           <MetricCard
             label="Total Premium (GWP)"
@@ -238,6 +226,24 @@ export const DashboardOverview = ({ navigate }: { navigate: Navigate }) => {
         </div>
 
         <DataReadiness deals={deals} claims={claims} />
+
+        {/* Reporting widgets — fixed grid in phase 1, per-user layout in phase 2. */}
+        <div className="mt-8 pt-6 border-t border-slate-200">
+          <h2 className="text-[13px] font-bold text-slate-900 mb-1">Reporting</h2>
+          <p className="text-[12px] text-slate-500 mb-4">
+            Portfolio, production, retention and panel spread. Each card links through to the underlying records.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {widgets.map(w => {
+              const Component = w.component;
+              return (
+                <div key={w.id} className={cn(w.defaultSpan === 2 && 'md:col-span-2')}>
+                  <Component navigate={navigate} />
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
