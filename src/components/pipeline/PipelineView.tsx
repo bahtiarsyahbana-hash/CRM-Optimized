@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useData } from '../../context/DataContext';
-import { Deal, DealType } from '../../types';
+import { Deal } from '../../types';
+import { DealTrack, trackOf } from '../../utils/dealTrack';
 import { Search, Building2, Edit2, GitBranch, Trash2, AlertTriangle, X, ShieldCheck } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
@@ -11,7 +12,7 @@ import { ApprovalStatusBadge } from './ApprovalActionMenu';
 
 export const PipelineView = () => {
   const { deals, clients, deleteDeal, bindDeal } = useData();
-  const [activeTab, setActiveTab] = useState<DealType>('New Business');
+  const [activeTab, setActiveTab] = useState<DealTrack>('New Business');
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<string>('All');
 
@@ -63,12 +64,9 @@ export const PipelineView = () => {
     // lives in the Submission view and lands here once it's approved.
     if (d.approvalStatus !== 'Approved') return false;
 
-    // Determine which tab the deal belongs to
-    const isRenewalTab = ['Renewal', 'Existing Client Update'].includes(d.dealType);
-    const isNewBusinessTab = !isRenewalTab; // 'New Business', 'Cross Sell', 'Upsell'
-
-    if (activeTab === 'New Business' && !isNewBusinessTab) return false;
-    if (activeTab === 'Renewal' && !isRenewalTab) return false;
+    // Which tab the deal belongs to. Shared with the Submissions tab strip so
+    // the two views can't disagree about what counts as a renewal.
+    if (trackOf(d.dealType) !== activeTab) return false;
 
     if (filterType !== 'All' && d.dealType !== filterType) return false;
     
