@@ -4,9 +4,12 @@ import { ShieldAlert, FileEdit, Plus, CheckCircle2, Clock, XCircle } from 'lucid
 import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
 
-export const AftersalesView = () => {
+export const AftersalesView: React.FC<{
+  /** Which tab to open on. The Servicing > Endorsements nav item passes 'endorsements'. */
+  initialTab?: 'claims' | 'endorsements';
+}> = ({ initialTab = 'claims' }) => {
   const { deals, claims, endorsements, addClaim, updateClaimStatus, addEndorsement, updateEndorsementStatus } = useData();
-  const [activeTab, setActiveTab] = useState<'claims' | 'endorsements'>('claims');
+  const [activeTab, setActiveTab] = useState<'claims' | 'endorsements'>(initialTab);
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [dealId, setDealId] = useState('');

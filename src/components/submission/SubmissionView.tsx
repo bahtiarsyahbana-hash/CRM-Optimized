@@ -6,6 +6,7 @@ import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
 import { DealDetailForm } from '../clients/DealDetailForm';
 import { ApprovalActionMenu, ApprovalStatusBadge } from '../pipeline/ApprovalActionMenu';
+import { DealTrack, trackOf } from '../../utils/dealTrack';
 
 /**
  * Submissions are deals that have not yet been approved. Approving one moves
@@ -13,6 +14,15 @@ import { ApprovalActionMenu, ApprovalStatusBadge } from '../pipeline/ApprovalAct
  * a single `deals` collection split on `approvalStatus`.
  */
 type StatusFilter = 'All' | DealApprovalStatus;
+
+/** New business and renewals both enter here; the tab strip splits them. */
+type TrackFilter = 'All' | DealTrack;
+const TRACK_TABS: TrackFilter[] = ['All', 'New Business', 'Renewal'];
+const TRACK_LABEL: Record<TrackFilter, string> = {
+  'All': 'All',
+  'New Business': 'New Business',
+  'Renewal': 'Renewals',
+};
 
 /** Statuses that belong to the submission stage (i.e. everything pre-approval). */
 const SUBMISSION_STATUSES: DealApprovalStatus[] = [
@@ -25,9 +35,13 @@ const SUBMISSION_STATUSES: DealApprovalStatus[] = [
 /** A deal with no explicit status is treated as an untouched Draft. */
 const statusOf = (deal: Deal): DealApprovalStatus => deal.approvalStatus || 'Draft';
 
-export const SubmissionView = () => {
+export const SubmissionView: React.FC<{
+  /** Seeded by dashboard drill-through (Retention lands on Renewals). */
+  initialTrack?: TrackFilter;
+}> = ({ initialTrack = 'All' }) => {
   const { deals, clients, deleteDeal } = useData();
   const [search, setSearch] = useState('');
+  const [trackFilter, setTrackFilter] = useState<TrackFilter>(initialTrack);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editDeal, setEditDeal] = useState<Deal | null>(null);
@@ -39,22 +53,37 @@ export const SubmissionView = () => {
     [deals]
   );
 
+  // Tab counts span every submission, so the strip shows the overall split
+  // regardless of which status or search is currently applied.
+  const trackCounts = useMemo(() => {
+    const base: Record<TrackFilter, number> = { 'All': submissions.length, 'New Business': 0, 'Renewal': 0 };
+    submissions.forEach(d => { base[trackOf(d.dealType)] += 1; });
+    return base;
+  }, [submissions]);
+
+  // Within the selected tab.
+  const inTrack = useMemo(
+    () => trackFilter === 'All' ? submissions : submissions.filter(d => trackOf(d.dealType) === trackFilter),
+    [submissions, trackFilter]
+  );
+
+  // Status pill counts follow the tab, so they describe what's actually in view.
   const counts = useMemo(() => {
     const base: Record<StatusFilter, number> = {
-      'All': submissions.length,
+      'All': inTrack.length,
       'Draft': 0,
       'Pending Approval': 0,
       'Approved': 0,
       'Rejected': 0,
       'Needs Adjustment': 0,
     };
-    submissions.forEach(d => { base[statusOf(d)] += 1; });
+    inTrack.forEach(d => { base[statusOf(d)] += 1; });
     return base;
-  }, [submissions]);
+  }, [inTrack]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return submissions
+    return inTrack
       .filter(d => {
         if (statusFilter !== 'All' && statusOf(d) !== statusFilter) return false;
         if (!q) return true;
@@ -67,7 +96,7 @@ export const SubmissionView = () => {
         );
       })
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  }, [submissions, statusFilter, search, clients]);
+  }, [inTrack, statusFilter, search, clients]);
 
   const confirmDelete = () => {
     if (!deleteCandidate) return;
@@ -94,6 +123,32 @@ export const SubmissionView = () => {
           <Plus className="w-4 h-4" />
           New Submission
         </button>
+      </div>
+
+      {/* Track tabs — new business and renewals both enter through Submissions. */}
+      <div className="flex gap-4 mb-6 border-b border-slate-200 pb-px shrink-0">
+        {TRACK_TABS.map(tab => (
+          <button
+            key={tab}
+            onClick={() => { setTrackFilter(tab); setStatusFilter('All'); }}
+            className={cn(
+              'pb-2 text-[13px] font-semibold transition-colors relative flex items-center gap-1.5',
+              trackFilter === tab
+                ? 'text-blue-600 border-b-2 border-blue-600'
+                : 'text-slate-500 hover:text-slate-800',
+            )}
+          >
+            {TRACK_LABEL[tab]}
+            <span
+              className={cn(
+                'px-1.5 py-0.5 rounded-full text-[10px] font-bold',
+                trackFilter === tab ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500',
+              )}
+            >
+              {trackCounts[tab]}
+            </span>
+          </button>
+        ))}
       </div>
 
       <div className="bg-white rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.05)] border border-slate-200 flex-1 flex flex-col overflow-hidden">
@@ -239,12 +294,18 @@ export const SubmissionView = () => {
             <div className="p-12 text-center text-slate-500 flex flex-col justify-center items-center">
               <Inbox className="w-10 h-10 text-slate-300 mb-3" />
               <p className="font-medium text-slate-900 mb-1">
-                {submissions.length === 0 ? 'No submissions yet' : 'No submissions match this filter'}
+                {submissions.length === 0
+                  ? 'No submissions yet'
+                  : inTrack.length === 0
+                    ? `No ${TRACK_LABEL[trackFilter].toLowerCase()} submissions`
+                    : 'No submissions match this filter'}
               </p>
               <p className="text-[13px] text-slate-500 mb-4">
                 {submissions.length === 0
                   ? 'Create a submission to start a new business or renewal deal.'
-                  : 'Try a different status filter or clear your search.'}
+                  : inTrack.length === 0
+                    ? 'Nothing on this track yet — try another tab.'
+                    : 'Try a different status filter or clear your search.'}
               </p>
               {submissions.length === 0 && (
                 <button

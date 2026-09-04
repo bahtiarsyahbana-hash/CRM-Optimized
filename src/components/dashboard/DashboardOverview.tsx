@@ -9,6 +9,8 @@ import {
   Coins, TrendingUp, Sparkles, Clock, ShieldAlert, Target,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { Navigate } from '../../lib/navigation';
+import { resolveLayout } from './widgets/registry';
 
 // ----- helpers --------------------------------------------------------------
 
@@ -47,8 +49,12 @@ const fmtIDRFull = (n: number) => `Rp ${Math.round(n).toLocaleString()}`;
 
 // ----- main view ------------------------------------------------------------
 
-export const DashboardOverview = () => {
+export const DashboardOverview = ({ navigate }: { navigate: Navigate }) => {
   const { deals, claims, clients } = useData();
+
+  // Phase 1: fixed layout straight from the registry. Phase 2 swaps this for
+  // a per-user persisted layout — resolveLayout already takes any string[].
+  const widgets = useMemo(() => resolveLayout(), []);
 
   const mtdCutoff = useMemo(() => currentMonthStart(), []);
 
@@ -139,6 +145,18 @@ export const DashboardOverview = () => {
           <div className="text-[11px] text-slate-500">
             {clients.length} client{clients.length === 1 ? '' : 's'} · {deals.length} deal{deals.length === 1 ? '' : 's'} · {claims.length} claim{claims.length === 1 ? '' : 's'} total
           </div>
+        </div>
+
+        {/* Reporting widgets — fixed grid in phase 1, per-user layout in phase 2. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          {widgets.map(w => {
+            const Component = w.component;
+            return (
+              <div key={w.id} className={cn(w.defaultSpan === 2 && 'md:col-span-2')}>
+                <Component navigate={navigate} />
+              </div>
+            );
+          })}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">

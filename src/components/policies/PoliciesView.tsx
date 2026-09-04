@@ -9,9 +9,12 @@ import { PolicyPreviewModal } from './PolicyPreviewModal';
 import { InvoiceModal } from './InvoiceModal';
 import { getInvoiceAging } from '../../utils/invoiceAging';
 
-export const PoliciesView = () => {
+export const PoliciesView: React.FC<{
+  /** Seeded by dashboard drill-through (Insurer Panel lands on one insurer). */
+  initialSearch?: string;
+}> = ({ initialSearch = '' }) => {
   const { deals, clients, updateDeal } = useData();
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState(initialSearch);
   // Single-month filter against periodStart — "show policies whose period starts in this month"
   const [periodStartMonth, setPeriodStartMonth] = useState(''); // format: YYYY-MM
 
@@ -23,9 +26,11 @@ export const PoliciesView = () => {
       d.dealType === 'Renewal';
     if (!matchesStatus) return false;
 
+    const q = searchTerm.toLowerCase();
     const matchesSearch =
-      d.typeOfInsurance.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      clients.find(c => c.id === d.clientId)?.companyName.toLowerCase().includes(searchTerm.toLowerCase());
+      d.typeOfInsurance.toLowerCase().includes(q) ||
+      (d.insuranceCompany || '').toLowerCase().includes(q) ||
+      clients.find(c => c.id === d.clientId)?.companyName.toLowerCase().includes(q);
     if (!matchesSearch) return false;
 
     if (periodStartMonth) {
