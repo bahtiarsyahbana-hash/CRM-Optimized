@@ -7,6 +7,7 @@
  */
 
 export type ViewId =
+  // Built
   | 'dashboard'
   | 'submission'
   | 'pipelines'
@@ -15,7 +16,16 @@ export type ViewId =
   | 'aftersales'
   | 'clients'
   | 'settings'
-  | 'architecture';
+  | 'architecture'
+  // Stubbed — in the nav, no implementation yet
+  | 'open-covers'
+  | 'certificates'
+  | 'invoices'
+  | 'cancellations'
+  | 'insurers'
+  | 'products'
+  | 'benefits'
+  | 'users-roles';
 
 /** Track tabs on the Submissions view. */
 export type SubmissionTrackParam = 'All' | 'New Business' | 'Renewal';

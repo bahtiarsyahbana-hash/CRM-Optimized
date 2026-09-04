@@ -13,6 +13,14 @@ import {
   FileEdit,
   ChevronDown,
   ChevronRight,
+  Umbrella,
+  FileCheck,
+  Receipt,
+  FileX,
+  Building,
+  Package,
+  ListChecks,
+  UserCog,
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { ClientsView } from './components/clients/ClientsView';
@@ -25,6 +33,7 @@ import { ArchitectureView } from './components/docs/ArchitectureView';
 import { DashboardOverview } from './components/dashboard/DashboardOverview';
 import { SettingsView } from './components/settings/SettingsView';
 import { GlobalSearch } from './components/shared/GlobalSearch';
+import { StubView } from './components/shared/StubView';
 import { NavTarget, Navigate, ViewId } from './lib/navigation';
 
 /* -------------------------------------------------------------------------- */
@@ -48,13 +57,12 @@ type NavEntry = NavLeaf | NavGroup;
 const isGroup = (entry: NavEntry): entry is NavGroup => 'children' in entry;
 
 /**
- * Group order follows the lifecycle: acquire → bind → service → reference → admin.
- * Dashboard sits outside any group, as its own top-level item.
+ * Group order follows the lifecycle: acquire → bind → bill → service →
+ * reference → admin. Dashboard and Invoices sit outside any group, as their
+ * own top-level items.
  *
- * Groups only cover pages that exist today. Billing (Invoices), Open Covers,
- * Certificates, Cancellations, Insurers, Products, Benefits and Users & Roles
- * are absent from this build and are therefore absent from the nav — they slot
- * into this same shape as they land.
+ * Items marked `stub` appear in the nav and render a placeholder — the
+ * structure is settled ahead of the implementation.
  */
 const NAV: NavEntry[] = [
   { id: 'dashboard', label: 'Dashboard', icon: PieChart },
@@ -70,13 +78,17 @@ const NAV: NavEntry[] = [
 
   {
     // Group ids live in their own namespace (collapse state) but are suffixed
-    // to keep them visibly distinct from ViewState ids.
+    // to keep them visibly distinct from ViewId values.
     id: 'group:policies',
     label: 'Policies',
     children: [
       { id: 'policies', label: 'Policy Register', icon: Briefcase },
+      { id: 'open-covers', label: 'Open Covers', icon: Umbrella },
+      { id: 'certificates', label: 'Certificates', icon: FileCheck },
     ],
   },
+
+  { id: 'invoices', label: 'Invoices', icon: Receipt },
 
   {
     id: 'group:servicing',
@@ -84,6 +96,7 @@ const NAV: NavEntry[] = [
     children: [
       { id: 'claims', label: 'Claims', icon: ShieldAlert },
       { id: 'aftersales', label: 'Endorsements', icon: FileEdit },
+      { id: 'cancellations', label: 'Cancellations', icon: FileX },
     ],
   },
 
@@ -92,6 +105,7 @@ const NAV: NavEntry[] = [
     label: 'Directory',
     children: [
       { id: 'clients', label: 'Clients', icon: Users },
+      { id: 'insurers', label: 'Insurers', icon: Building },
     ],
   },
 
@@ -99,11 +113,58 @@ const NAV: NavEntry[] = [
     id: 'group:administration',
     label: 'Administration',
     children: [
+      { id: 'products', label: 'Products', icon: Package },
+      { id: 'benefits', label: 'Benefits', icon: ListChecks },
+      { id: 'users-roles', label: 'Users & Roles', icon: UserCog },
       { id: 'settings', label: 'Settings', icon: Settings },
       { id: 'architecture', label: 'System Docs', icon: Database },
     ],
   },
 ];
+
+/**
+ * Briefs for the unbuilt pages. Keeping the intent next to the nav means the
+ * placeholder states what the page is for rather than just that it's missing.
+ * `today` notes where the underlying data currently lives, when it exists.
+ */
+const STUBS: Record<string, { title: string; purpose: string; today?: string }> = {
+  'open-covers': {
+    title: 'Open Covers',
+    purpose: 'Master covers that individual shipments or risks declare against.',
+  },
+  'certificates': {
+    title: 'Certificates',
+    purpose: 'Declarations issued under an open cover.',
+  },
+  'invoices': {
+    title: 'Invoices',
+    purpose: 'Premium billing and collection across the book.',
+    today: 'Invoice date, payment status and receipt date are captured today per policy, from the Invoice action on the Policy Register.',
+  },
+  'cancellations': {
+    title: 'Cancellations',
+    purpose: 'Mid-term cancellations and the return premium they generate.',
+  },
+  'insurers': {
+    title: 'Insurers',
+    purpose: 'The panel — insurer records, contacts and placement history.',
+    today: 'Insurers are a fixed list in constants/insuranceCompanies.ts, selected on a deal but not stored as records.',
+  },
+  'products': {
+    title: 'Products',
+    purpose: 'Product catalogue and the insurance types available under each.',
+    today: 'Products and their types are defined in types.ts as PRODUCT_INSURANCE_TYPES, and drive the cascade on the submission form.',
+  },
+  'benefits': {
+    title: 'Benefits',
+    purpose: 'Reusable benefit and coverage definitions to build products from.',
+  },
+  'users-roles': {
+    title: 'Users & Roles',
+    purpose: 'User accounts and the permissions attached to them.',
+    today: 'There is no authentication in this build — the app runs as a single implicit admin user.',
+  },
+};
 
 /* -------------------------------------------------------------------------- */
 
@@ -239,6 +300,9 @@ function Shell() {
             {currentView === 'clients' && <ClientsView />}
             {currentView === 'settings' && <SettingsView />}
             {currentView === 'architecture' && <ArchitectureView />}
+
+            {/* Unbuilt pages — present in the nav, awaiting a brief. */}
+            {STUBS[currentView] && <StubView {...STUBS[currentView]} />}
           </div>
         </div>
       </main>
