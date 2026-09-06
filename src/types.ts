@@ -665,3 +665,41 @@ export interface InsurerMigrationReport {
   masterPoliciesMatched: number;
   masterPoliciesUnmatched: { id: string; policyNumber: string; insuranceCompany: string; reason: string }[];
 }
+
+/* -------------------------------------------------------------------------- */
+/*                  Administration — Products, Benefits, LOB                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Products, Benefits and Lines of Business share one shape: Name, Category,
+ * Code. They live in separate collections but are edited through the same
+ * generic catalogue screen, since three near-identical pages would be three
+ * places to fix every bug.
+ */
+export interface CatalogueItem {
+  id: string;
+  name: string;
+  category: string;
+  /** Unique within its own catalogue, uppercase. */
+  code: string;
+  description?: string;
+  /**
+   * Soft delete. An item referenced by a client, deal or policy is never
+   * removed — it is deactivated, leaves the pickers, and keeps history intact.
+   */
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Which catalogue an item belongs to. Each is stored separately. */
+export type CatalogueKind = 'products' | 'benefits' | 'linesOfBusiness';
+
+/** Written once per catalogue by the seeder so the result stays inspectable. */
+export interface CatalogueSeedReport {
+  kind: CatalogueKind;
+  ranAt: string;
+  seeded: number;
+  /** Values found on existing records that were not in the built-in list. */
+  discoveredFromData: string[];
+}

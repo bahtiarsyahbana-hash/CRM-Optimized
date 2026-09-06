@@ -37,6 +37,7 @@ import { StubView } from './components/shared/StubView';
 import { MasterPoliciesView } from './components/masterpolicies/MasterPoliciesView';
 import { UsersRolesView } from './components/administration/UsersRolesView';
 import { InsurersView } from './components/administration/InsurersView';
+import { CatalogueView } from './components/administration/CatalogueView';
 import { useData } from './context/DataContext';
 import { visibleViews, moduleForView } from './utils/permissions';
 import { NavTarget, Navigate, ViewId, resolveViewId } from './lib/navigation';
@@ -141,25 +142,6 @@ const STUBS: Record<string, { title: string; purpose: string; today?: string }> 
   'cancellations': {
     title: 'Cancellations',
     purpose: 'Mid-term cancellations and the return premium they generate.',
-  },
-  'products': {
-    title: 'Products',
-    purpose: 'Product catalogue and the insurance types available under each.',
-    today: 'Products and their types are defined in types.ts as PRODUCT_INSURANCE_TYPES, and drive the cascade on the submission form.',
-  },
-  'benefits': {
-    title: 'Benefits',
-    purpose: 'Reusable benefit and coverage definitions to build products from.',
-  },
-  'lines-of-business': {
-    title: 'Lines of Business',
-    purpose: 'Client industry list — the categories a client is classified under.',
-    today: 'Line of Business is an open-ended union on Client (accepts any string) with no managed list, which is the fragmentation this page exists to fix.',
-  },
-  'users-roles': {
-    title: 'Users & Roles',
-    purpose: 'User accounts and the permissions attached to them.',
-    today: 'There is no authentication in this build — the app runs as a single implicit admin user.',
   },
 };
 
@@ -350,6 +332,11 @@ function Shell() {
             {currentView === 'master-policies' && <MasterPoliciesView />}
             {currentView === 'users-roles' && <UsersRolesView />}
             {currentView === 'insurers' && <InsurersView />}
+            {currentView === 'products' && <CatalogueView key="products" kind="products" />}
+            {currentView === 'benefits' && <CatalogueView key="benefits" kind="benefits" />}
+            {currentView === 'lines-of-business' && (
+              <CatalogueView key="linesOfBusiness" kind="linesOfBusiness" />
+            )}
             {currentView === 'claims' && <ClaimsView />}
             {currentView === 'aftersales' && <AftersalesView initialTab="endorsements" />}
             {currentView === 'clients' && <ClientsView />}

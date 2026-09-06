@@ -3,6 +3,7 @@ import {
   Deal, Claim, ClaimStatus, Endorsement, HistoryLog, DealStage, DealType, Client,
   DealApprovalAction, DealApprovalLogEntry, DealApprovalStatus, DealStageLogEntry,
   MasterPolicy, RatingRule, AppUser, UserRole, Insurer, InsurerMigrationReport,
+  CatalogueItem, CatalogueKind, CatalogueSeedReport, PRODUCT_TYPES,
 } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -11,9 +12,61 @@ import {
 } from '../data/januaryActualClients';
 import { INSURANCE_COMPANIES } from '../constants/insuranceCompanies';
 import { deriveInsurerCode, uniqueInsurerCode, matchInsurerByName } from '../utils/insurers';
+import { deriveCatalogueCode, uniqueCatalogueCode } from '../utils/catalogue';
 
 const JANUARY_CLIENT_IMPORT_KEY = 'iris_january_2026_actual_clients_v1';
 const INSURER_MIGRATION_KEY = 'iris_insurer_catalogue_v1';
+const CATALOGUE_SEED_KEY = 'iris_catalogues_v1';
+
+/** Built-in Lines of Business — the union literals that predate the catalogue. */
+const BUILT_IN_LOB = ['Manufacture', 'Trading', 'Financial Institution', 'Property', 'Individual', 'Others'];
+
+function buildCatalogue(names: string[], category: string): CatalogueItem[] {
+  const now = new Date().toISOString();
+  const taken = new Set<string>();
+  return names.map(name => {
+    const code = uniqueCatalogueCode(deriveCatalogueCode(name), taken);
+    taken.add(code);
+    return {
+      id: uuidv4(), name, category, code,
+      active: true, createdAt: now, updatedAt: now,
+    };
+  });
+}
+
+/**
+ * Seed the three catalogues once.
+ *
+ * Products come from PRODUCT_TYPES. Lines of Business come from the built-in
+ * literals *plus* any value already sitting on a client — LineOfBusiness is an
+ * open union that accepts any string, so real data is where the fragmentation
+ * actually lives and dropping it would lose classifications. Benefits seed
+ * empty: nothing models them today, and seeding from SOC coverage templates
+ * would prejudge the reconciliation that is deliberately deferred.
+ */
+function seedCatalogues(clients: Client[]) {
+  const now = new Date().toISOString();
+
+  const products = buildCatalogue([...PRODUCT_TYPES], 'Insurance Product');
+
+  const fromData = [...new Set(
+    clients.map(c => (c.lineOfBusiness || '').trim()).filter(Boolean),
+  )];
+  const discovered = fromData.filter(
+    v => !BUILT_IN_LOB.some(b => b.toLowerCase() === v.toLowerCase()),
+  );
+  const linesOfBusiness = buildCatalogue([...BUILT_IN_LOB, ...discovered], 'Industry Sector');
+
+  const benefits: CatalogueItem[] = [];
+
+  const reports: CatalogueSeedReport[] = [
+    { kind: 'products', ranAt: now, seeded: products.length, discoveredFromData: [] },
+    { kind: 'benefits', ranAt: now, seeded: 0, discoveredFromData: [] },
+    { kind: 'linesOfBusiness', ranAt: now, seeded: linesOfBusiness.length, discoveredFromData: discovered },
+  ];
+
+  return { products, benefits, linesOfBusiness, reports };
+}
 
 /**
  * Seed the insurer catalogue from the constant that used to be the only source,
@@ -196,6 +249,16 @@ interface DataContextType {
   updateInsurer: (id: string, updates: Partial<Insurer>) => void;
   /** Hard-deletes only when unreferenced; otherwise deactivates. Returns what it did. */
   removeInsurer: (id: string) => 'deleted' | 'deactivated';
+
+  /* ---- Catalogues: products, benefits, lines of business ---- */
+  products: CatalogueItem[];
+  benefits: CatalogueItem[];
+  linesOfBusiness: CatalogueItem[];
+  catalogueSeedReports: CatalogueSeedReport[];
+  addCatalogueItem: (kind: CatalogueKind, item: Omit<CatalogueItem, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  updateCatalogueItem: (kind: CatalogueKind, id: string, updates: Partial<CatalogueItem>) => void;
+  /** Hard-deletes only when unreferenced; otherwise deactivates. */
+  removeCatalogueItem: (kind: CatalogueKind, id: string, referenced: boolean) => 'deleted' | 'deactivated';
   /* ---- Master policies & rating rules ---- */
   masterPolicies: MasterPolicy[];
   ratingRules: RatingRule[];
@@ -237,6 +300,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [currentUserId, setCurrentUserIdState] = useState<string | null>(null);
   const [insurers, setInsurers] = useState<Insurer[]>([]);
   const [insurerMigrationReport, setInsurerMigrationReport] = useState<InsurerMigrationReport | null>(null);
+  const [products, setProducts] = useState<CatalogueItem[]>([]);
+  const [benefits, setBenefits] = useState<CatalogueItem[]>([]);
+  const [linesOfBusiness, setLinesOfBusiness] = useState<CatalogueItem[]>([]);
+  const [catalogueSeedReports, setCatalogueSeedReports] = useState<CatalogueSeedReport[]>([]);
 
   useEffect(() => {
     // Load data from localStorage on mount
@@ -255,6 +322,26 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } else {
       setClients(storedClients);
     }
+    // ---- Catalogues: seed once from the constants plus live client data ----
+    const clientsForSeed: Client[] = JSON.parse(localStorage.getItem('clients') || '[]');
+    if (!localStorage.getItem(CATALOGUE_SEED_KEY)) {
+      const c = seedCatalogues(clientsForSeed);
+      saveAll('products', c.products);
+      saveAll('benefits', c.benefits);
+      saveAll('linesOfBusiness', c.linesOfBusiness);
+      localStorage.setItem(CATALOGUE_SEED_KEY, JSON.stringify(c.reports));
+      setProducts(c.products);
+      setBenefits(c.benefits);
+      setLinesOfBusiness(c.linesOfBusiness);
+      setCatalogueSeedReports(c.reports);
+    } else {
+      setProducts(load('products'));
+      setBenefits(load('benefits'));
+      setLinesOfBusiness(load('linesOfBusiness'));
+      try { setCatalogueSeedReports(JSON.parse(localStorage.getItem(CATALOGUE_SEED_KEY)!)); }
+      catch { setCatalogueSeedReports([]); }
+    }
+
     setClaims(migrateClaims(load('claims')));
     setEndorsements(load('endorsements'));
     setHistoryLogs(load('historyLogs'));
@@ -646,6 +733,58 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return 'deleted';
   };
 
+  /* ---- Catalogues -------------------------------------------------------- */
+
+  const CATALOGUE_SETTERS: Record<CatalogueKind, React.Dispatch<React.SetStateAction<CatalogueItem[]>>> = {
+    products: setProducts,
+    benefits: setBenefits,
+    linesOfBusiness: setLinesOfBusiness,
+  };
+
+  const addCatalogueItem = (
+    kind: CatalogueKind,
+    data: Omit<CatalogueItem, 'id' | 'createdAt' | 'updatedAt'>,
+  ) => {
+    const now = new Date().toISOString();
+    CATALOGUE_SETTERS[kind](prev => {
+      const next = [...prev, { ...data, id: uuidv4(), createdAt: now, updatedAt: now }];
+      saveAll(kind, next);
+      return next;
+    });
+  };
+
+  const updateCatalogueItem = (kind: CatalogueKind, id: string, updates: Partial<CatalogueItem>) => {
+    CATALOGUE_SETTERS[kind](prev => {
+      const next = prev.map(i =>
+        i.id === id ? { ...i, ...updates, updatedAt: new Date().toISOString() } : i);
+      saveAll(kind, next);
+      return next;
+    });
+  };
+
+  /**
+   * Soft delete. The caller supplies whether the item is referenced, since each
+   * catalogue is referenced through a different field — products via
+   * Deal.productType, lines of business via Client.lineOfBusiness, benefits by
+   * nothing yet.
+   */
+  const removeCatalogueItem = (
+    kind: CatalogueKind,
+    id: string,
+    referenced: boolean,
+  ): 'deleted' | 'deactivated' => {
+    if (referenced) {
+      updateCatalogueItem(kind, id, { active: false });
+      return 'deactivated';
+    }
+    CATALOGUE_SETTERS[kind](prev => {
+      const next = prev.filter(i => i.id !== id);
+      saveAll(kind, next);
+      return next;
+    });
+    return 'deleted';
+  };
+
   const addClaim = (claimData: Omit<Claim, 'id' | 'dateRegistered'>) => {
     const newClaim: Claim = {
       ...claimData,
@@ -694,6 +833,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCurrentUserIdState(null);
     setInsurers([]);
     setInsurerMigrationReport(null);
+    setProducts([]);
+    setBenefits([]);
+    setLinesOfBusiness([]);
+    setCatalogueSeedReports([]);
   };
 
   return (
@@ -706,6 +849,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       currentUser: users.find(u => u.id === currentUserId) ?? null,
       setCurrentUserId, addUser, updateUser, deleteUser,
       insurers, insurerMigrationReport, addInsurer, updateInsurer, removeInsurer,
+      products, benefits, linesOfBusiness, catalogueSeedReports,
+      addCatalogueItem, updateCatalogueItem, removeCatalogueItem,
       masterPolicies, ratingRules,
       addMasterPolicy, updateMasterPolicy, deleteMasterPolicy,
       addRatingRule, updateRatingRule, deleteRatingRule,
