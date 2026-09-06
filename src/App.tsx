@@ -20,6 +20,7 @@ import {
   Package,
   ListChecks,
   UserCog,
+  Layers,
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { ClientsView } from './components/clients/ClientsView';
@@ -34,6 +35,9 @@ import { SettingsView } from './components/settings/SettingsView';
 import { GlobalSearch } from './components/shared/GlobalSearch';
 import { StubView } from './components/shared/StubView';
 import { MasterPoliciesView } from './components/masterpolicies/MasterPoliciesView';
+import { UsersRolesView } from './components/administration/UsersRolesView';
+import { useData } from './context/DataContext';
+import { visibleViews, moduleForView } from './utils/permissions';
 import { NavTarget, Navigate, ViewId, resolveViewId } from './lib/navigation';
 
 /* -------------------------------------------------------------------------- */
@@ -114,6 +118,7 @@ const NAV: NavEntry[] = [
     children: [
       { id: 'products', label: 'Products', icon: Package },
       { id: 'benefits', label: 'Benefits', icon: ListChecks },
+      { id: 'lines-of-business', label: 'Lines of Business', icon: Layers },
       { id: 'users-roles', label: 'Users & Roles', icon: UserCog },
       { id: 'settings', label: 'Settings', icon: Settings },
       { id: 'architecture', label: 'System Docs', icon: Database },
@@ -150,6 +155,11 @@ const STUBS: Record<string, { title: string; purpose: string; today?: string }> 
     title: 'Benefits',
     purpose: 'Reusable benefit and coverage definitions to build products from.',
   },
+  'lines-of-business': {
+    title: 'Lines of Business',
+    purpose: 'Client industry list — the categories a client is classified under.',
+    today: 'Line of Business is an open-ended union on Client (accepts any string) with no managed list, which is the fragmentation this page exists to fix.',
+  },
   'users-roles': {
     title: 'Users & Roles',
     purpose: 'User accounts and the permissions attached to them.',
@@ -160,6 +170,7 @@ const STUBS: Record<string, { title: string; purpose: string; today?: string }> 
 /* -------------------------------------------------------------------------- */
 
 function Shell() {
+  const { currentUser, users, setCurrentUserId } = useData();
   const [nav, setNav] = useState<NavTarget>({ view: 'submission' });
   const currentView = nav.view;
 
@@ -176,6 +187,20 @@ function Shell() {
    */
   const navKey = `${nav.view}:${JSON.stringify(nav.params ?? {})}`;
 
+  /**
+   * Switching role can hide the screen you are standing on. Fall back to the
+   * first visible entry rather than rendering a blank pane.
+   */
+  React.useEffect(() => {
+    const mod = moduleForView(nav.view);
+    if (mod && !visibleViews(currentUser).has(nav.view)) {
+      const first = NAV.flatMap(e => (isGroup(e) ? e.children : [e]))
+        .find(leaf => !moduleForView(leaf.id) || visibleViews(currentUser).has(leaf.id));
+      if (first) setNav({ view: first.id });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, currentUser?.role]);
+
   // Every group starts expanded; state is per-session.
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
 
@@ -187,10 +212,30 @@ function Shell() {
       return next;
     });
 
+  /**
+   * Sidebar entries this user may see. A module set to None is hidden entirely
+   * rather than shown and refused on click. Views with no module behind them
+   * (System Docs) are always visible.
+   *
+   * TODO(supabase): this shapes the UI only. When auth lands, every gated view
+   * needs a server-side check too — hiding a link protects nothing.
+   */
+  const allowedViews = useMemo(() => visibleViews(currentUser), [currentUser]);
+  const maySee = (view: ViewId) => !moduleForView(view) || allowedViews.has(view);
+
+  const NAV_FOR_USER = useMemo(
+    () => NAV
+      .map(entry => isGroup(entry)
+        ? { ...entry, children: entry.children.filter(c => maySee(c.id)) }
+        : entry)
+      .filter(entry => isGroup(entry) ? entry.children.length > 0 : maySee(entry.id)),
+    [allowedViews],
+  );
+
   // Which group holds the active view — used to keep a collapsed group marked active.
   const activeGroupId = useMemo(
-    () => NAV.find(e => isGroup(e) && e.children.some(c => c.id === currentView))?.id,
-    [currentView],
+    () => NAV_FOR_USER.find(e => isGroup(e) && e.children.some(c => c.id === currentView))?.id,
+    [currentView, NAV_FOR_USER],
   );
 
   return (
@@ -204,16 +249,34 @@ function Shell() {
           </span>
         </div>
         <GlobalSearch onNavigate={(view) => setCurrentView(view as ViewId)} />
+        {/* No auth — this is an "acting as" switcher, not a session. It exists so
+            the role matrix is observable at all. */}
         <div className="flex items-center gap-2.5 text-sm font-medium text-slate-700">
-          <span className="hidden sm:block">Admin User</span>
-          <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold">A</div>
+          <div className="hidden sm:flex flex-col items-end leading-tight">
+            <select
+              value={currentUser?.id ?? ''}
+              onChange={e => setCurrentUserId(e.target.value)}
+              title="Acting as — no login, this only changes which screens are shown"
+              className="text-sm font-medium text-slate-700 bg-transparent border-none focus:outline-none cursor-pointer text-right pr-1"
+            >
+              {users.filter(u => u.active).map(u => (
+                <option key={u.id} value={u.id}>{u.name}</option>
+              ))}
+            </select>
+            <span className="text-[10px] text-slate-400 pr-1">
+              {currentUser?.role ?? 'No user'} · viewing as
+            </span>
+          </div>
+          <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold">
+            {(currentUser?.name ?? 'A').charAt(0).toUpperCase()}
+          </div>
         </div>
       </header>
 
       <main className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
         <nav className="w-[200px] border-r border-slate-200 bg-white flex flex-col py-4 shrink-0 overflow-y-auto">
-          {NAV.map(entry => {
+          {NAV_FOR_USER.map(entry => {
             /* --- Ungrouped top-level item (Dashboard) --- */
             if (!isGroup(entry)) {
               const active = currentView === entry.id;
@@ -289,6 +352,7 @@ function Shell() {
               <PoliciesView key={navKey} initialSearch={nav.params?.insurer} />
             )}
             {currentView === 'master-policies' && <MasterPoliciesView />}
+            {currentView === 'users-roles' && <UsersRolesView />}
             {currentView === 'claims' && <ClaimsView />}
             {currentView === 'aftersales' && <AftersalesView initialTab="endorsements" />}
             {currentView === 'clients' && <ClientsView />}

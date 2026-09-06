@@ -1,3 +1,5 @@
+import type { ViewId } from './lib/navigation';
+
 export type DealType = 'New Business' | 'Renewal' | 'Cross Sell' | 'Upsell' | 'Existing Client Update';
 export type DealStage = 'Leads' | 'Data Collection' | 'Quote' | 'Nego' | 'Bind / Closed Won' | 'Policy On Progress' | 'Lost';
 export type LineOfBusiness = 'Manufacture' | 'Trading' | 'Financial Institution' | 'Property' | 'Individual' | 'Others' | string;
@@ -446,4 +448,134 @@ export interface SOCDetails {
   attentionTo?: string;
   socDate?: string;
   socNumber?: string;
+}
+/* -------------------------------------------------------------------------- */
+/*                        Administration — Users & Roles                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * NOT SECURITY. There is no authentication and no server in this build, so
+ * nothing here protects data — a determined user can edit localStorage
+ * directly. This is role-based *UI convenience*: it shapes what each person
+ * sees so they aren't wading through screens they never use.
+ *
+ * TODO(supabase): when auth lands, every permission read must be mirrored by a
+ * server-side check. Until then no label, tooltip or copy anywhere should imply
+ * these are access controls.
+ */
+export type UserRole = 'Administrator' | 'Operations' | 'Finance' | 'Viewer';
+export const USER_ROLES: UserRole[] = ['Administrator', 'Operations', 'Finance', 'Viewer'];
+
+/** Deliberately three values, not granular CRUD. */
+export type PermissionLevel = 'None' | 'View' | 'Edit';
+export const PERMISSION_LEVELS: PermissionLevel[] = ['None', 'View', 'Edit'];
+
+export type PermissionModule =
+  | 'dashboard'
+  | 'submissions'
+  | 'pipeline'
+  | 'policies'
+  | 'masterPolicies'
+  | 'ratingRules'
+  | 'commission'
+  | 'invoices'
+  | 'claims'
+  | 'endorsements'
+  | 'cancellations'
+  | 'clients'
+  | 'insurers'
+  | 'products'
+  | 'benefits'
+  | 'linesOfBusiness'
+  | 'users'
+  | 'settings';
+
+export interface PermissionModuleDef {
+  id: PermissionModule;
+  label: string;
+  /**
+   * The sidebar entry this module gates. A module set to None hides that entry
+   * entirely. Undefined means the module is a permission gate on something
+   * inside another page rather than a page of its own.
+   */
+  navView?: ViewId;
+  description: string;
+}
+
+export const PERMISSION_MODULES: PermissionModuleDef[] = [
+  { id: 'dashboard',       label: 'Dashboard',        navView: 'dashboard',        description: 'Reporting widgets and headline figures.' },
+  { id: 'submissions',     label: 'Submissions',      navView: 'submission',       description: 'New business and renewal submissions.' },
+  { id: 'pipeline',        label: 'Pipeline',         navView: 'pipelines',        description: 'Approved deals through to bind.' },
+  { id: 'policies',        label: 'Policy Register',  navView: 'policies',         description: 'Bound policies and cover notes.' },
+  { id: 'masterPolicies',  label: 'Master Policies',  navView: 'master-policies',  description: 'Open covers, certificates and their declarations.' },
+  { id: 'ratingRules',     label: 'Rating Rules',                                  description: 'Rates on a master policy. Separate from the cover itself so a role can declare without changing rates.' },
+  { id: 'commission',      label: 'Commission',                                    description: 'Commission figures on a deal.' },
+  { id: 'invoices',        label: 'Invoices',         navView: 'invoices',         description: 'Premium billing, payment and collection.' },
+  { id: 'claims',          label: 'Claims',           navView: 'claims',           description: 'Claim registration and progress.' },
+  { id: 'endorsements',    label: 'Endorsements',     navView: 'aftersales',       description: 'Mid-term policy changes.' },
+  { id: 'cancellations',   label: 'Cancellations',    navView: 'cancellations',    description: 'Mid-term cancellations and return premium.' },
+  { id: 'clients',         label: 'Clients',          navView: 'clients',          description: 'Client records.' },
+  { id: 'insurers',        label: 'Insurers',         navView: 'insurers',         description: 'Insurer panel — master data.' },
+  { id: 'products',        label: 'Products',         navView: 'products',         description: 'Product catalogue — master data.' },
+  { id: 'benefits',        label: 'Benefits',         navView: 'benefits',         description: 'Benefit catalogue — master data.' },
+  { id: 'linesOfBusiness', label: 'Lines of Business',navView: 'lines-of-business',description: 'Client industry list — master data.' },
+  { id: 'users',           label: 'Users & Roles',    navView: 'users-roles',      description: 'User accounts and the role matrix.' },
+  { id: 'settings',        label: 'Settings',         navView: 'settings',         description: 'System settings.' },
+];
+
+/**
+ * Default permission per role and module.
+ *
+ * Reading of the brief's role table:
+ *   Operations  "no rate changes"  -> ratingRules View, not Edit
+ *               "no master data"   -> insurers/products/benefits/LOB None
+ *               "no users"         -> users None
+ *   Finance     "read-only on pipeline" -> pipeline View; owns invoices and commission
+ *   Viewer      "read-only everywhere"  -> View across the operational app
+ *
+ * Users is Administrator-only, since the table distinguishes Administrator by
+ * "including user management". Viewer therefore does not see it, which is the
+ * one place "read-only everywhere" is read as the operational app rather than
+ * literally every screen.
+ */
+export const ROLE_PERMISSIONS: Record<UserRole, Record<PermissionModule, PermissionLevel>> = {
+  Administrator: {
+    dashboard: 'Edit', submissions: 'Edit', pipeline: 'Edit', policies: 'Edit',
+    masterPolicies: 'Edit', ratingRules: 'Edit', commission: 'Edit', invoices: 'Edit',
+    claims: 'Edit', endorsements: 'Edit', cancellations: 'Edit', clients: 'Edit',
+    insurers: 'Edit', products: 'Edit', benefits: 'Edit', linesOfBusiness: 'Edit',
+    users: 'Edit', settings: 'Edit',
+  },
+  Operations: {
+    dashboard: 'View', submissions: 'Edit', pipeline: 'Edit', policies: 'Edit',
+    masterPolicies: 'Edit', ratingRules: 'View', commission: 'View', invoices: 'View',
+    claims: 'Edit', endorsements: 'Edit', cancellations: 'Edit', clients: 'Edit',
+    insurers: 'None', products: 'None', benefits: 'None', linesOfBusiness: 'None',
+    users: 'None', settings: 'View',
+  },
+  Finance: {
+    dashboard: 'View', submissions: 'View', pipeline: 'View', policies: 'View',
+    masterPolicies: 'View', ratingRules: 'View', commission: 'Edit', invoices: 'Edit',
+    claims: 'View', endorsements: 'View', cancellations: 'View', clients: 'View',
+    insurers: 'View', products: 'View', benefits: 'View', linesOfBusiness: 'View',
+    users: 'None', settings: 'View',
+  },
+  Viewer: {
+    dashboard: 'View', submissions: 'View', pipeline: 'View', policies: 'View',
+    masterPolicies: 'View', ratingRules: 'View', commission: 'View', invoices: 'View',
+    claims: 'View', endorsements: 'View', cancellations: 'View', clients: 'View',
+    insurers: 'View', products: 'View', benefits: 'View', linesOfBusiness: 'View',
+    users: 'None', settings: 'View',
+  },
+};
+
+export interface AppUser {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  division?: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
 }

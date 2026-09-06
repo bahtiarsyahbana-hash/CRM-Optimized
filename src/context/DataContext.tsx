@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import {
   Deal, Claim, ClaimStatus, Endorsement, HistoryLog, DealStage, DealType, Client,
   DealApprovalAction, DealApprovalLogEntry, DealApprovalStatus, DealStageLogEntry,
-  MasterPolicy, RatingRule,
+  MasterPolicy, RatingRule, AppUser, UserRole,
 } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -119,6 +119,16 @@ interface DataContextType {
   updateRatingRule: (id: string, updates: Partial<RatingRule>) => void;
   deleteRatingRule: (id: string) => void;
 
+  /* ---- Users & roles (UI shaping only — see utils/permissions.ts) ---- */
+  users: AppUser[];
+  /** Who the app is acting as. No auth — this is a switcher, not a session. */
+  currentUserId: string | null;
+  currentUser: AppUser | null;
+  setCurrentUserId: (id: string) => void;
+  addUser: (user: Omit<AppUser, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  updateUser: (id: string, updates: Partial<AppUser>) => void;
+  deleteUser: (id: string) => void;
+
   addClaim: (claim: Omit<Claim, 'id' | 'dateRegistered'>) => void;
   updateClaimStatus: (id: string, status: Claim['status']) => void;
   addEndorsement: (endorsement: Omit<Endorsement, 'id' | 'dateRequested'>) => void;
@@ -136,6 +146,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [historyLogs, setHistoryLogs] = useState<HistoryLog[]>([]);
   const [masterPolicies, setMasterPolicies] = useState<MasterPolicy[]>([]);
   const [ratingRules, setRatingRules] = useState<RatingRule[]>([]);
+  const [users, setUsers] = useState<AppUser[]>([]);
+  const [currentUserId, setCurrentUserIdState] = useState<string | null>(null);
 
   useEffect(() => {
     // Load data from localStorage on mount
@@ -160,6 +172,26 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setHistoryLogs(load('historyLogs'));
     setMasterPolicies(load('masterPolicies'));
     setRatingRules(load('ratingRules'));
+
+    // Seed a single Administrator on first run. Without one there would be no
+    // way to reach Users & Roles and create the first account.
+    const storedUsers: AppUser[] = load('users');
+    const seeded = storedUsers.length > 0 ? storedUsers : [{
+      id: uuidv4(),
+      name: 'Admin User',
+      email: 'admin@bindcover.com',
+      role: 'Administrator' as UserRole,
+      division: 'Management',
+      active: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }];
+    if (storedUsers.length === 0) saveAll('users', seeded);
+    setUsers(seeded);
+
+    const storedCurrent = localStorage.getItem('currentUserId');
+    const valid = storedCurrent && seeded.some(u => u.id === storedCurrent && u.active);
+    setCurrentUserIdState(valid ? storedCurrent : (seeded.find(u => u.active)?.id ?? null));
   }, []);
 
   const saveAll = (dataKey: string, data: any) => {
@@ -415,6 +447,52 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
+  /* ---- Users -------------------------------------------------------------
+   * Role-based UI shaping only. There is no auth, so none of this protects
+   * data — see utils/permissions.ts. The last-Administrator rule is enforced
+   * in the UI via canSaveUserEdit / canDeleteUser.
+   * TODO(supabase): mirror every guard server-side when auth lands.
+   */
+
+  const setCurrentUserId = (id: string) => {
+    localStorage.setItem('currentUserId', id);
+    setCurrentUserIdState(id);
+  };
+
+  const addUser = (data: Omit<AppUser, 'id' | 'createdAt' | 'updatedAt'>) => {
+    const now = new Date().toISOString();
+    const created: AppUser = { ...data, id: uuidv4(), createdAt: now, updatedAt: now };
+    setUsers(prev => {
+      const next = [...prev, created];
+      saveAll('users', next);
+      return next;
+    });
+  };
+
+  const updateUser = (id: string, updates: Partial<AppUser>) => {
+    setUsers(prev => {
+      const next = prev.map(u =>
+        u.id === id ? { ...u, ...updates, updatedAt: new Date().toISOString() } : u);
+      saveAll('users', next);
+      return next;
+    });
+  };
+
+  const deleteUser = (id: string) => {
+    setUsers(prev => {
+      const next = prev.filter(u => u.id !== id);
+      saveAll('users', next);
+      // Never leave the app acting as a user that no longer exists.
+      if (currentUserId === id) {
+        const fallback = next.find(u => u.active)?.id ?? null;
+        if (fallback) localStorage.setItem('currentUserId', fallback);
+        else localStorage.removeItem('currentUserId');
+        setCurrentUserIdState(fallback);
+      }
+      return next;
+    });
+  };
+
   const addClaim = (claimData: Omit<Claim, 'id' | 'dateRegistered'>) => {
     const newClaim: Claim = {
       ...claimData,
@@ -459,6 +537,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setHistoryLogs([]);
     setMasterPolicies([]);
     setRatingRules([]);
+    setUsers([]);
+    setCurrentUserIdState(null);
   };
 
   return (
@@ -466,6 +546,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       clients, deals, claims, endorsements, historyLogs,
       addClient, updateClient, deleteClient,
       addDeal, updateDeal, deleteDeal, updateDealStage, recordApproval, bindDeal,
+      users,
+      currentUserId,
+      currentUser: users.find(u => u.id === currentUserId) ?? null,
+      setCurrentUserId, addUser, updateUser, deleteUser,
       masterPolicies, ratingRules,
       addMasterPolicy, updateMasterPolicy, deleteMasterPolicy,
       addRatingRule, updateRatingRule, deleteRatingRule,

@@ -24,6 +24,7 @@ export type ViewId =
   | 'insurers'
   | 'products'
   | 'benefits'
+  | 'lines-of-business'
   | 'users-roles';
 
 /** Track tabs on the Submissions view. */
