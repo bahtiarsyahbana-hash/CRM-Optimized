@@ -41,8 +41,8 @@ import {
   Trash2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { INSURANCE_COMPANIES } from '../../constants/insuranceCompanies';
 import { isRenewal } from '../../utils/dealTrack';
+import { selectableInsurers, resolveBaseCommissionRate } from '../../utils/insurers';
 import { cn } from '../../lib/utils';
 
 /* -------------------------------------------------------------------------- */
@@ -102,7 +102,7 @@ export const DealDetailForm = ({
   deal?: Deal | null;
   onClose: () => void;
 }) => {
-  const { addDeal, updateDeal, clients } = useData();
+  const { addDeal, updateDeal, clients, insurers } = useData();
 
   /* ----- Step navigation ----- */
   const [stepIdx, setStepIdx] = useState(0);
@@ -151,7 +151,9 @@ export const DealDetailForm = ({
   const [picName, setPicName] = useState(deal?.picName || '');
   const [picEmail, setPicEmail] = useState(deal?.picEmail || '');
   const [picPhone, setPicPhone] = useState(deal?.picPhone || '');
-  const [insuranceCompany, setInsuranceCompany] = useState(deal?.insuranceCompany || '');
+  const [insurerId, setInsurerId] = useState(deal?.insurerId || '');
+  const insurerOptions = selectableInsurers(insurers, deal?.insurerId);
+  const selectedInsurer = insurers.find(i => i.id === insurerId) || null;
 
   /* ----- Step 2: Multi-product support -----
    *
@@ -326,13 +328,24 @@ export const DealDetailForm = ({
     deal?.commission?.overrideFeeType || 'fixed'
   );
 
-  // Auto-suggest base commission once a Type of Insurance is chosen.
+  /**
+   * Suggest a base commission. The insurer's own rate wins when one is selected
+   * and has a rate; otherwise defaultCommissionRate supplies it.
+   *
+   * Still seeds only when the field is empty — a rate the user has typed is
+   * never overwritten, including when they later change insurer.
+   */
+  const commissionSuggestion = useMemo(
+    () => resolveBaseCommissionRate(selectedInsurer, selectedClient || undefined, typeOfInsurance, productType),
+    [selectedInsurer, selectedClient, typeOfInsurance, productType],
+  );
+
   useEffect(() => {
     if (typeOfInsurance && !baseRate) {
-      setBaseRate(String(defaultCommissionRate(selectedClient || undefined, typeOfInsurance, productType)));
+      setBaseRate(String(commissionSuggestion.rate));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [typeOfInsurance, productType, selectedClient?.id]);
+  }, [typeOfInsurance, productType, selectedClient?.id, insurerId]);
 
   /**
    * Live breakdown, recomputed as the user types. Drives the totals panel in
@@ -366,7 +379,7 @@ export const DealDetailForm = ({
       !dealType ? 'Deal Type is required.' : null,
       !typeOfInsurance ? 'Type of Insurance is required.' : null,
       !productType ? 'Product Type is required.' : null,
-      !insuranceCompany ? 'Insurance Company is required.' : null,
+      !insurerId ? 'Insurer is required.' : null,
     ].filter(Boolean) as string[],
     premium: [
       premiumType === 'Percentage from Sum Insured' && !premiumRatePercent
@@ -471,7 +484,9 @@ export const DealDetailForm = ({
     premiumAmount: breakdown.totalPremiumPayable,
 
     coverNoteNumber: isMultiProductMode ? undefined : (primaryCoverNoteNumber || deal?.coverNoteNumber),
-    insuranceCompany: insuranceCompany || undefined,
+    insurerId: insurerId || undefined,
+    // Name kept alongside the id so documents and older views still read.
+    insuranceCompany: selectedInsurer?.name,
     periodStart: periodStart ? new Date(periodStart).toISOString() : undefined,
     periodEnd: periodEnd ? new Date(periodEnd).toISOString() : undefined,
     statusStage,
@@ -632,7 +647,8 @@ export const DealDetailForm = ({
                 picName, setPicName,
                 picEmail, setPicEmail,
                 picPhone, setPicPhone,
-                insuranceCompany, setInsuranceCompany,
+                insurerId, setInsurerId, insurerOptions,
+                commissionSuggestion,
                 extraLines, addProductLine, removeProductLine, updateProductLine,
                 primaryCoverNoteNumber, setPrimaryCoverNoteNumber,
                 allLineSumInsured,
@@ -691,7 +707,7 @@ export const DealDetailForm = ({
               data={{
                 clientAddress, dealType, typeOfInsurance, productType, sumInsured,
                 currency, premiumType, riskLocation, riskDetail, periodStart, periodEnd,
-                picName, picEmail, picPhone, insuranceCompany, statusStage, documents,
+                picName, picEmail, picPhone, insurerName: selectedInsurer?.name ?? '', statusStage, documents,
                 agentName, overrideFeeType,
                 premiumRatePercent,
                 breakdown,
@@ -858,7 +874,8 @@ interface StepCoverageProps {
   picName: string;                                    setPicName: (v: string) => void;
   picEmail: string;                                   setPicEmail: (v: string) => void;
   picPhone: string;                                   setPicPhone: (v: string) => void;
-  insuranceCompany: string;                           setInsuranceCompany: (v: string) => void;
+  insurerId: string;                                  setInsurerId: (v: string) => void;
+  insurerOptions: { id: string; code: string; name: string; commissionRatePercent?: number }[];
   /** Multi-product (extra) lines beyond the primary product. */
   extraLines: {
     id: string;
@@ -951,11 +968,12 @@ const StepCoverage: React.FC<StepCoverageProps> = (p) => {
           />
         </Field>
 
-        <Field label="Insurance Company" required>
-          <select value={p.insuranceCompany} onChange={e => p.setInsuranceCompany(e.target.value)} className={inputClass}>
-            <option value="">Select Insurance Company</option>
-            {INSURANCE_COMPANIES.map(co => <option key={co} value={co}>{co}</option>)}
-            <option value="Other">Other</option>
+        <Field label="Insurer" required hint="Managed in Administration → Insurers.">
+          <select value={p.insurerId} onChange={e => p.setInsurerId(e.target.value)} className={inputClass}>
+            <option value="">Select insurer</option>
+            {p.insurerOptions.map(i => (
+              <option key={i.id} value={i.id}>{i.code} — {i.name}</option>
+            ))}
           </select>
         </Field>
 
@@ -1607,7 +1625,7 @@ interface PreviewData {
   picName: string;
   picEmail: string;
   picPhone: string;
-  insuranceCompany: string;
+  insurerName: string;
   statusStage: DealStage;
   documents: DealDocuments;
   agentName: string;
@@ -1651,7 +1669,7 @@ const StepPreview: React.FC<{
           <PreviewRow label="Deal Type" value={data.dealType} />
           <PreviewRow label="Type of Insurance" value={data.typeOfInsurance} />
           <PreviewRow label="Product" value={data.productType || '—'} />
-          <PreviewRow label="Insurance Company" value={data.insuranceCompany || '—'} />
+          <PreviewRow label="Insurer" value={data.insurerName || '—'} />
           <PreviewRow label="Sum Insured" value={data.sumInsured ? `${data.currency} ${data.sumInsured}` : '—'} />
           <PreviewRow
             label="Premium Due to Insured"

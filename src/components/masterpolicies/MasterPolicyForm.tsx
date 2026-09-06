@@ -6,8 +6,8 @@ import {
   Currency, CURRENCIES,
   ProductType, PRODUCT_TYPES, insuranceTypesForProduct,
 } from '../../types';
-import { INSURANCE_COMPANIES } from '../../constants/insuranceCompanies';
 import { canChangePolicyType } from '../../utils/masterPolicyRating';
+import { selectableInsurers } from '../../utils/insurers';
 import { X, Umbrella, Lock, Info } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
@@ -44,7 +44,7 @@ export const MasterPolicyForm: React.FC<{
   policy?: MasterPolicy | null;
   onClose: () => void;
 }> = ({ policy, onClose }) => {
-  const { clients, deals, addMasterPolicy, updateMasterPolicy, addRatingRule } = useData();
+  const { clients, deals, insurers, addMasterPolicy, updateMasterPolicy, addRatingRule } = useData();
 
   const [policyNumber, setPolicyNumber] = useState(policy?.policyNumber || '');
   const [clientId, setClientId] = useState(policy?.clientId || '');
@@ -52,7 +52,7 @@ export const MasterPolicyForm: React.FC<{
   const [rateStructure, setRateStructure] = useState<RateStructure>(policy?.rateStructure || 'Single Rate');
   const [productType, setProductType] = useState<ProductType | ''>(policy?.productType || '');
   const [typeOfInsurance, setTypeOfInsurance] = useState(policy?.typeOfInsurance || '');
-  const [insuranceCompany, setInsuranceCompany] = useState(policy?.insuranceCompany || '');
+  const [insurerId, setInsurerId] = useState(policy?.insurerId || '');
   const [currency, setCurrency] = useState<Currency>(policy?.currency || 'IDR');
   // Default rates seed a RatingRule on save — they are not columns on the cover.
   // Only offered when creating; an existing cover's rates are managed as rules.
@@ -67,6 +67,9 @@ export const MasterPolicyForm: React.FC<{
   const [notes, setNotes] = useState(policy?.notes || '');
 
   const selectedClient = clients.find(c => c.id === clientId) || null;
+  // Active insurers, plus whichever is already on this cover even if retired.
+  const insurerOptions = selectableInsurers(insurers, policy?.insurerId);
+  const selectedInsurer = insurers.find(i => i.id === insurerId) || null;
   const isDual = rateStructure === 'Dual Rate';
 
   // Policy Type is immutable once the cover has declarations, because it
@@ -126,7 +129,9 @@ export const MasterPolicyForm: React.FC<{
       lineOfBusiness: selectedClient?.lineOfBusiness || 'Others',
       productType: (productType || undefined) as ProductType | undefined,
       typeOfInsurance: typeOfInsurance || undefined,
-      insuranceCompany: insuranceCompany || undefined,
+      insurerId: insurerId || undefined,
+      // Name kept alongside the id so older views and documents still read.
+      insuranceCompany: selectedInsurer?.name,
       currency,
       periodStart: periodStart ? new Date(periodStart).toISOString() : undefined,
       periodEnd: periodEnd ? new Date(periodEnd).toISOString() : undefined,
@@ -250,11 +255,17 @@ export const MasterPolicyForm: React.FC<{
                   </select>
                 </Field>
 
-                <Field label="Insurer">
-                  <select value={insuranceCompany} onChange={e => setInsuranceCompany(e.target.value)} className={inputClass}>
+                <Field
+                  label="Insurer"
+                  hint={selectedInsurer?.commissionRatePercent != null
+                    ? `Default commission ${selectedInsurer.commissionRatePercent}%`
+                    : 'Managed in Administration → Insurers.'}
+                >
+                  <select value={insurerId} onChange={e => setInsurerId(e.target.value)} className={inputClass}>
                     <option value="">Select insurer</option>
-                    {INSURANCE_COMPANIES.map(c => <option key={c} value={c}>{c}</option>)}
-                    <option value="Other">Other</option>
+                    {insurerOptions.map(i => (
+                      <option key={i.id} value={i.id}>{i.code} — {i.name}</option>
+                    ))}
                   </select>
                 </Field>
 

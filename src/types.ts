@@ -235,7 +235,13 @@ export interface Deal {
   /** Free-text rate note shown on the cover note. */
   premiumRate?: string;
   socDetails?: SOCDetails;
+  /**
+   * Insurer name, kept as the display value and for records predating the
+   * insurer catalogue. `insurerId` is the reference that matters.
+   */
   insuranceCompany?: string;
+  /** Reference into the insurer catalogue. Backfilled from insuranceCompany. */
+  insurerId?: string;
   statusStage: DealStage;
   riskLocation?: string;
   riskDetail?: string;
@@ -342,7 +348,10 @@ export interface MasterPolicy {
   lineOfBusiness: LineOfBusiness;
   productType?: ProductType;
   typeOfInsurance?: string;
+  /** Insurer name, kept as the display value. `insurerId` is the reference. */
   insuranceCompany?: string;
+  /** Reference into the insurer catalogue. Backfilled from insuranceCompany. */
+  insurerId?: string;
 
   /** Cover currency. Marine cargo routinely runs USD, hence a field per cover. */
   currency: Currency;
@@ -578,4 +587,81 @@ export interface AppUser {
   active: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                          Administration — Insurers                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A contact at an insurer. There are several per insurer deliberately — a
+ * broker typically deals with a marine PIC and a non-marine PIC at the same
+ * company, and collapsing them to one loses the distinction that matters.
+ */
+export interface InsurerContact {
+  id: string;
+  /** Person In Charge. */
+  name: string;
+  email?: string;
+  phone?: string;
+  /** What this contact covers, e.g. "Marine", "Non-Marine", "Claims". */
+  scope?: string;
+}
+
+/**
+ * Document METADATA ONLY. No file contents are stored, ever.
+ *
+ * IRIS persists everything to localStorage, which has roughly a 5 MB quota
+ * shared across the entire app. A single 2 MB PDF base64-encodes to about
+ * 2.7 MB, so two documents would exhaust the quota and take clients, deals,
+ * policies and declarations down with them.
+ *
+ * TODO(supabase): when the backend lands, add a storage bucket and put the
+ * object key here. The upload control in InsurerForm is a placeholder until
+ * then and says so.
+ */
+export interface InsurerDocument {
+  id: string;
+  name: string;
+  /** Free text — "Slip", "Treaty", "Rate sheet", "Agency agreement"... */
+  type: string;
+  /** ISO date the document was received, not when the row was created. */
+  uploadDate: string;
+  note?: string;
+}
+
+export interface Insurer {
+  id: string;
+  name: string;
+  /** Unique, uppercase, short reference. */
+  code: string;
+  email?: string;
+  phone?: string;
+  /**
+   * Default commission for this insurer. Pre-fills a deal's base commission
+   * when the insurer is selected, and stays editable per deal.
+   */
+  commissionRatePercent?: number;
+  contacts: InsurerContact[];
+  documents: InsurerDocument[];
+  /**
+   * Soft delete. An insurer referenced by any deal or master policy is never
+   * removed — it is deactivated, disappears from pickers, and keeps its
+   * history intact.
+   */
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Written once by the insurerId backfill so the result stays inspectable. */
+export interface InsurerMigrationReport {
+  ranAt: string;
+  seededInsurers: number;
+  dealsTotal: number;
+  dealsMatched: number;
+  dealsUnmatched: { id: string; insuranceCompany: string; reason: string }[];
+  masterPoliciesTotal: number;
+  masterPoliciesMatched: number;
+  masterPoliciesUnmatched: { id: string; policyNumber: string; insuranceCompany: string; reason: string }[];
 }

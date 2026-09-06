@@ -36,6 +36,7 @@ import { GlobalSearch } from './components/shared/GlobalSearch';
 import { StubView } from './components/shared/StubView';
 import { MasterPoliciesView } from './components/masterpolicies/MasterPoliciesView';
 import { UsersRolesView } from './components/administration/UsersRolesView';
+import { InsurersView } from './components/administration/InsurersView';
 import { useData } from './context/DataContext';
 import { visibleViews, moduleForView } from './utils/permissions';
 import { NavTarget, Navigate, ViewId, resolveViewId } from './lib/navigation';
@@ -140,11 +141,6 @@ const STUBS: Record<string, { title: string; purpose: string; today?: string }> 
   'cancellations': {
     title: 'Cancellations',
     purpose: 'Mid-term cancellations and the return premium they generate.',
-  },
-  'insurers': {
-    title: 'Insurers',
-    purpose: 'The panel — insurer records, contacts and placement history.',
-    today: 'Insurers are a fixed list in constants/insuranceCompanies.ts, selected on a deal but not stored as records.',
   },
   'products': {
     title: 'Products',
@@ -353,6 +349,7 @@ function Shell() {
             )}
             {currentView === 'master-policies' && <MasterPoliciesView />}
             {currentView === 'users-roles' && <UsersRolesView />}
+            {currentView === 'insurers' && <InsurersView />}
             {currentView === 'claims' && <ClaimsView />}
             {currentView === 'aftersales' && <AftersalesView initialTab="endorsements" />}
             {currentView === 'clients' && <ClientsView />}

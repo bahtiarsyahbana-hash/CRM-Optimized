@@ -2,15 +2,94 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import {
   Deal, Claim, ClaimStatus, Endorsement, HistoryLog, DealStage, DealType, Client,
   DealApprovalAction, DealApprovalLogEntry, DealApprovalStatus, DealStageLogEntry,
-  MasterPolicy, RatingRule, AppUser, UserRole,
+  MasterPolicy, RatingRule, AppUser, UserRole, Insurer, InsurerMigrationReport,
 } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import {
   JANUARY_ACTUAL_CLIENTS,
   normalizePrimaryClientName,
 } from '../data/januaryActualClients';
+import { INSURANCE_COMPANIES } from '../constants/insuranceCompanies';
+import { deriveInsurerCode, uniqueInsurerCode, matchInsurerByName } from '../utils/insurers';
 
 const JANUARY_CLIENT_IMPORT_KEY = 'iris_january_2026_actual_clients_v1';
+const INSURER_MIGRATION_KEY = 'iris_insurer_catalogue_v1';
+
+/**
+ * Seed the insurer catalogue from the constant that used to be the only source,
+ * then backfill `insurerId` onto every deal and master policy by exact name
+ * match.
+ *
+ * Anything that does not match keeps its `insuranceCompany` string and is
+ * listed in the report rather than being silently left null — an unmatched
+ * record is a deal whose commission rate can no longer be resolved from its
+ * insurer, which is worth seeing.
+ */
+function seedInsurersAndBackfill(deals: Deal[], masterPolicies: MasterPolicy[]) {
+  const now = new Date().toISOString();
+  const taken = new Set<string>();
+
+  const insurers: Insurer[] = INSURANCE_COMPANIES.map(name => {
+    const code = uniqueInsurerCode(deriveInsurerCode(name), taken);
+    taken.add(code);
+    return {
+      id: uuidv4(),
+      name,
+      code,
+      contacts: [],
+      documents: [],
+      active: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
+
+  const dealsUnmatched: InsurerMigrationReport['dealsUnmatched'] = [];
+  const mpUnmatched: InsurerMigrationReport['masterPoliciesUnmatched'] = [];
+  let dealsMatched = 0;
+  let mpMatched = 0;
+
+  const reasonFor = (name?: string) =>
+    !name || !name.trim() ? 'No insurer recorded on the record'
+      : name.trim() === 'Other' ? 'Recorded as "Other" — the picker\'s free-text escape hatch'
+      : 'Name is not in the seeded catalogue';
+
+  const nextDeals = deals.map(d => {
+    if (d.insurerId) return d;
+    const match = matchInsurerByName(insurers, d.insuranceCompany);
+    if (match) { dealsMatched++; return { ...d, insurerId: match.id }; }
+    if (d.insuranceCompany) {
+      dealsUnmatched.push({ id: d.id, insuranceCompany: d.insuranceCompany, reason: reasonFor(d.insuranceCompany) });
+    }
+    return d;
+  });
+
+  const nextMasterPolicies = masterPolicies.map(mp => {
+    if (mp.insurerId) return mp;
+    const match = matchInsurerByName(insurers, mp.insuranceCompany);
+    if (match) { mpMatched++; return { ...mp, insurerId: match.id }; }
+    if (mp.insuranceCompany) {
+      mpUnmatched.push({
+        id: mp.id, policyNumber: mp.policyNumber,
+        insuranceCompany: mp.insuranceCompany, reason: reasonFor(mp.insuranceCompany),
+      });
+    }
+    return mp;
+  });
+
+  const report: InsurerMigrationReport = {
+    ranAt: now,
+    seededInsurers: insurers.length,
+    dealsTotal: deals.length,
+    dealsMatched,
+    dealsUnmatched,
+    masterPoliciesTotal: masterPolicies.length,
+    masterPoliciesMatched: mpMatched,
+    masterPoliciesUnmatched: mpUnmatched,
+  };
+
+  return { insurers, deals: nextDeals, masterPolicies: nextMasterPolicies, report };
+}
 
 /**
  * Migrate legacy claims to the new ClaimStatus values + dateRegistered field.
@@ -109,6 +188,14 @@ interface DataContextType {
   /** Move a deal to Policy On Progress and stamp bindDate. Returns false if the
    *  deal is missing an insurance company (required to bind). */
   bindDeal: (id: string, notes?: string) => boolean;
+
+  /* ---- Insurers ---- */
+  insurers: Insurer[];
+  insurerMigrationReport: InsurerMigrationReport | null;
+  addInsurer: (insurer: Omit<Insurer, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  updateInsurer: (id: string, updates: Partial<Insurer>) => void;
+  /** Hard-deletes only when unreferenced; otherwise deactivates. Returns what it did. */
+  removeInsurer: (id: string) => 'deleted' | 'deactivated';
   /* ---- Master policies & rating rules ---- */
   masterPolicies: MasterPolicy[];
   ratingRules: RatingRule[];
@@ -148,6 +235,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [ratingRules, setRatingRules] = useState<RatingRule[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]);
   const [currentUserId, setCurrentUserIdState] = useState<string | null>(null);
+  const [insurers, setInsurers] = useState<Insurer[]>([]);
+  const [insurerMigrationReport, setInsurerMigrationReport] = useState<InsurerMigrationReport | null>(null);
 
   useEffect(() => {
     // Load data from localStorage on mount
@@ -166,12 +255,34 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } else {
       setClients(storedClients);
     }
-    setDeals(load('deals'));
     setClaims(migrateClaims(load('claims')));
     setEndorsements(load('endorsements'));
     setHistoryLogs(load('historyLogs'));
-    setMasterPolicies(load('masterPolicies'));
     setRatingRules(load('ratingRules'));
+
+    // ---- Insurer catalogue: seed once, then backfill insurerId ----
+    const storedDeals: Deal[] = load('deals');
+    const storedMPs: MasterPolicy[] = load('masterPolicies');
+    const storedInsurers: Insurer[] = load('insurers');
+
+    if (!localStorage.getItem(INSURER_MIGRATION_KEY)) {
+      const m = seedInsurersAndBackfill(storedDeals, storedMPs);
+      saveAll('insurers', m.insurers);
+      saveAll('deals', m.deals);
+      saveAll('masterPolicies', m.masterPolicies);
+      localStorage.setItem(INSURER_MIGRATION_KEY, JSON.stringify(m.report));
+      setInsurers(m.insurers);
+      setDeals(m.deals);
+      setMasterPolicies(m.masterPolicies);
+      setInsurerMigrationReport(m.report);
+    } else {
+      setInsurers(storedInsurers);
+      setDeals(storedDeals);
+      setMasterPolicies(storedMPs);
+      try {
+        setInsurerMigrationReport(JSON.parse(localStorage.getItem(INSURER_MIGRATION_KEY)!));
+      } catch { setInsurerMigrationReport(null); }
+    }
 
     // Seed a single Administrator on first run. Without one there would be no
     // way to reach Users & Roles and create the first account.
@@ -493,6 +604,48 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
+  /* ---- Insurers ---------------------------------------------------------- */
+
+  const addInsurer = (data: Omit<Insurer, 'id' | 'createdAt' | 'updatedAt'>) => {
+    const now = new Date().toISOString();
+    setInsurers(prev => {
+      const next = [...prev, { ...data, id: uuidv4(), createdAt: now, updatedAt: now }];
+      saveAll('insurers', next);
+      return next;
+    });
+  };
+
+  const updateInsurer = (id: string, updates: Partial<Insurer>) => {
+    setInsurers(prev => {
+      const next = prev.map(i =>
+        i.id === id ? { ...i, ...updates, updatedAt: new Date().toISOString() } : i);
+      saveAll('insurers', next);
+      return next;
+    });
+  };
+
+  /**
+   * Soft delete. An insurer referenced by any deal or master policy is
+   * deactivated rather than removed, so the history on those records keeps
+   * resolving. Only a completely unreferenced insurer is actually deleted.
+   */
+  const removeInsurer = (id: string): 'deleted' | 'deactivated' => {
+    const referenced =
+      deals.some(d => d.insurerId === id) ||
+      masterPolicies.some(mp => mp.insurerId === id);
+
+    if (referenced) {
+      updateInsurer(id, { active: false });
+      return 'deactivated';
+    }
+    setInsurers(prev => {
+      const next = prev.filter(i => i.id !== id);
+      saveAll('insurers', next);
+      return next;
+    });
+    return 'deleted';
+  };
+
   const addClaim = (claimData: Omit<Claim, 'id' | 'dateRegistered'>) => {
     const newClaim: Claim = {
       ...claimData,
@@ -539,6 +692,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRatingRules([]);
     setUsers([]);
     setCurrentUserIdState(null);
+    setInsurers([]);
+    setInsurerMigrationReport(null);
   };
 
   return (
@@ -550,6 +705,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       currentUserId,
       currentUser: users.find(u => u.id === currentUserId) ?? null,
       setCurrentUserId, addUser, updateUser, deleteUser,
+      insurers, insurerMigrationReport, addInsurer, updateInsurer, removeInsurer,
       masterPolicies, ratingRules,
       addMasterPolicy, updateMasterPolicy, deleteMasterPolicy,
       addRatingRule, updateRatingRule, deleteRatingRule,
