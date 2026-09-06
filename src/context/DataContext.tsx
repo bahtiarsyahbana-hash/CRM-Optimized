@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import {
   Deal, Claim, ClaimStatus, Endorsement, HistoryLog, DealStage, DealType, Client,
   DealApprovalAction, DealApprovalLogEntry, DealApprovalStatus, DealStageLogEntry,
+  MasterPolicy, RatingRule,
 } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -108,6 +109,16 @@ interface DataContextType {
   /** Move a deal to Policy On Progress and stamp bindDate. Returns false if the
    *  deal is missing an insurance company (required to bind). */
   bindDeal: (id: string, notes?: string) => boolean;
+  /* ---- Master policies & rating rules ---- */
+  masterPolicies: MasterPolicy[];
+  ratingRules: RatingRule[];
+  addMasterPolicy: (mp: Omit<MasterPolicy, 'id' | 'createdAt' | 'updatedAt'>) => string;
+  updateMasterPolicy: (id: string, updates: Partial<MasterPolicy>) => void;
+  deleteMasterPolicy: (id: string) => void;
+  addRatingRule: (rule: Omit<RatingRule, 'id' | 'createdAt'>) => void;
+  updateRatingRule: (id: string, updates: Partial<RatingRule>) => void;
+  deleteRatingRule: (id: string) => void;
+
   addClaim: (claim: Omit<Claim, 'id' | 'dateRegistered'>) => void;
   updateClaimStatus: (id: string, status: Claim['status']) => void;
   addEndorsement: (endorsement: Omit<Endorsement, 'id' | 'dateRequested'>) => void;
@@ -123,6 +134,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [claims, setClaims] = useState<Claim[]>([]);
   const [endorsements, setEndorsements] = useState<Endorsement[]>([]);
   const [historyLogs, setHistoryLogs] = useState<HistoryLog[]>([]);
+  const [masterPolicies, setMasterPolicies] = useState<MasterPolicy[]>([]);
+  const [ratingRules, setRatingRules] = useState<RatingRule[]>([]);
 
   useEffect(() => {
     // Load data from localStorage on mount
@@ -145,6 +158,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setClaims(migrateClaims(load('claims')));
     setEndorsements(load('endorsements'));
     setHistoryLogs(load('historyLogs'));
+    setMasterPolicies(load('masterPolicies'));
+    setRatingRules(load('ratingRules'));
   }, []);
 
   const saveAll = (dataKey: string, data: any) => {
@@ -336,6 +351,70 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
+  /* ---- Master policies -------------------------------------------------- */
+
+  /** Returns the new id so the caller can navigate straight to the cover. */
+  const addMasterPolicy = (data: Omit<MasterPolicy, 'id' | 'createdAt' | 'updatedAt'>): string => {
+    const now = new Date().toISOString();
+    const created: MasterPolicy = { ...data, id: uuidv4(), createdAt: now, updatedAt: now };
+    setMasterPolicies(prev => {
+      const next = [...prev, created];
+      saveAll('masterPolicies', next);
+      return next;
+    });
+    return created.id;
+  };
+
+  const updateMasterPolicy = (id: string, updates: Partial<MasterPolicy>) => {
+    setMasterPolicies(prev => {
+      const next = prev.map(mp =>
+        mp.id === id ? { ...mp, ...updates, updatedAt: new Date().toISOString() } : mp);
+      saveAll('masterPolicies', next);
+      return next;
+    });
+  };
+
+  const deleteMasterPolicy = (id: string) => {
+    setMasterPolicies(prev => {
+      const next = prev.filter(mp => mp.id !== id);
+      saveAll('masterPolicies', next);
+      return next;
+    });
+    // A rule has no meaning without its cover.
+    setRatingRules(prev => {
+      const next = prev.filter(r => r.masterPolicyId !== id);
+      saveAll('ratingRules', next);
+      return next;
+    });
+  };
+
+  /* ---- Rating rules ----------------------------------------------------- */
+
+  const addRatingRule = (data: Omit<RatingRule, 'id' | 'createdAt'>) => {
+    const created: RatingRule = { ...data, id: uuidv4(), createdAt: new Date().toISOString() };
+    setRatingRules(prev => {
+      const next = [...prev, created];
+      saveAll('ratingRules', next);
+      return next;
+    });
+  };
+
+  const updateRatingRule = (id: string, updates: Partial<RatingRule>) => {
+    setRatingRules(prev => {
+      const next = prev.map(r => r.id === id ? { ...r, ...updates } : r);
+      saveAll('ratingRules', next);
+      return next;
+    });
+  };
+
+  const deleteRatingRule = (id: string) => {
+    setRatingRules(prev => {
+      const next = prev.filter(r => r.id !== id);
+      saveAll('ratingRules', next);
+      return next;
+    });
+  };
+
   const addClaim = (claimData: Omit<Claim, 'id' | 'dateRegistered'>) => {
     const newClaim: Claim = {
       ...claimData,
@@ -378,6 +457,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setClaims([]);
     setEndorsements([]);
     setHistoryLogs([]);
+    setMasterPolicies([]);
+    setRatingRules([]);
   };
 
   return (
@@ -385,6 +466,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       clients, deals, claims, endorsements, historyLogs,
       addClient, updateClient, deleteClient,
       addDeal, updateDeal, deleteDeal, updateDealStage, recordApproval, bindDeal,
+      masterPolicies, ratingRules,
+      addMasterPolicy, updateMasterPolicy, deleteMasterPolicy,
+      addRatingRule, updateRatingRule, deleteRatingRule,
       addClaim, updateClaimStatus, addEndorsement, updateEndorsementStatus,
       clearDatabase
     }}>

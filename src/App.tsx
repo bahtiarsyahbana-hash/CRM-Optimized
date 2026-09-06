@@ -14,7 +14,6 @@ import {
   ChevronDown,
   ChevronRight,
   Umbrella,
-  FileCheck,
   Receipt,
   FileX,
   Building,
@@ -34,7 +33,8 @@ import { DashboardOverview } from './components/dashboard/DashboardOverview';
 import { SettingsView } from './components/settings/SettingsView';
 import { GlobalSearch } from './components/shared/GlobalSearch';
 import { StubView } from './components/shared/StubView';
-import { NavTarget, Navigate, ViewId } from './lib/navigation';
+import { MasterPoliciesView } from './components/masterpolicies/MasterPoliciesView';
+import { NavTarget, Navigate, ViewId, resolveViewId } from './lib/navigation';
 
 /* -------------------------------------------------------------------------- */
 /*                                 Nav config                                 */
@@ -83,8 +83,7 @@ const NAV: NavEntry[] = [
     label: 'Policies',
     children: [
       { id: 'policies', label: 'Policy Register', icon: Briefcase },
-      { id: 'open-covers', label: 'Open Covers', icon: Umbrella },
-      { id: 'certificates', label: 'Certificates', icon: FileCheck },
+      { id: 'master-policies', label: 'Master Policies', icon: Umbrella },
     ],
   },
 
@@ -128,14 +127,6 @@ const NAV: NavEntry[] = [
  * `today` notes where the underlying data currently lives, when it exists.
  */
 const STUBS: Record<string, { title: string; purpose: string; today?: string }> = {
-  'open-covers': {
-    title: 'Open Covers',
-    purpose: 'Master covers that individual shipments or risks declare against.',
-  },
-  'certificates': {
-    title: 'Certificates',
-    purpose: 'Declarations issued under an open cover.',
-  },
   'invoices': {
     title: 'Invoices',
     purpose: 'Premium billing and collection across the book.',
@@ -172,9 +163,11 @@ function Shell() {
   const [nav, setNav] = useState<NavTarget>({ view: 'submission' });
   const currentView = nav.view;
 
-  const navigate: Navigate = (target) => setNav(target);
+  /** Retired ids (open-covers, certificates) resolve to the view that replaced them. */
+  const navigate: Navigate = (target) =>
+    setNav({ ...target, view: resolveViewId(target.view) });
   /** Sidebar clicks navigate without params, clearing any active drill-through filter. */
-  const setCurrentView = (view: ViewId) => setNav({ view });
+  const setCurrentView = (view: ViewId) => navigate({ view });
 
   /**
    * Remount key for the content area. Views seed their filters from props on
@@ -295,6 +288,7 @@ function Shell() {
             {currentView === 'policies' && (
               <PoliciesView key={navKey} initialSearch={nav.params?.insurer} />
             )}
+            {currentView === 'master-policies' && <MasterPoliciesView />}
             {currentView === 'claims' && <ClaimsView />}
             {currentView === 'aftersales' && <AftersalesView initialTab="endorsements" />}
             {currentView === 'clients' && <ClientsView />}

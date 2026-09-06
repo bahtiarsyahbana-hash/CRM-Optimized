@@ -17,9 +17,8 @@ export type ViewId =
   | 'clients'
   | 'settings'
   | 'architecture'
+  | 'master-policies'
   // Stubbed — in the nav, no implementation yet
-  | 'open-covers'
-  | 'certificates'
   | 'invoices'
   | 'cancellations'
   | 'insurers'
@@ -49,3 +48,21 @@ export interface NavTarget {
 }
 
 export type Navigate = (target: NavTarget) => void;
+
+/**
+ * Views that were merged or renamed, mapped to where they live now.
+ *
+ * There is no router, so these are not URL redirects — they are id
+ * redirects, applied when navigation is requested with a retired id (a stale
+ * dashboard drill-through, a persisted view preference, a deep link once URLs
+ * exist). Open Cover and Certificate became two *types* of one Master Policy
+ * page rather than two pages.
+ */
+export const RETIRED_VIEW_IDS: Record<string, ViewId> = {
+  'open-covers': 'master-policies',
+  'certificates': 'master-policies',
+};
+
+/** Resolve a possibly-retired view id to the view that serves it today. */
+export const resolveViewId = (id: string): ViewId =>
+  (RETIRED_VIEW_IDS[id] ?? id) as ViewId;
