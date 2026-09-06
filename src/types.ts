@@ -252,6 +252,34 @@ export interface Deal {
   approvalLog?: DealApprovalLogEntry[];
   /** Per-deal history of stage transitions with optional notes. */
   stageLog?: DealStageLogEntry[];
+  /* ---- Declaration under a master policy ------------------------------ *
+   * A declaration is a Deal with `masterPolicyId` set, so it inherits
+   * invoicing, claims, commission and the policy register rather than
+   * duplicating them. Presence of this field is what makes a deal a
+   * declaration, and it drives three rules:
+   *   - rates are locked (no override, any role)
+   *   - the manual Markup field is hidden (the spread supplies it)
+   *   - premiums derive from the cover's rating rules, never from an import file
+   */
+  /** Set when this deal was declared under a master policy. */
+  masterPolicyId?: string;
+  declarationNumber?: string;
+  /** Date of declaration. Selects the rating rule and fixes the FX rate. */
+  declaredAt?: string;
+  /** Rule this declaration was rated from — lineage only. */
+  ratingRuleId?: string;
+  /**
+   * Rates snapshotted at declaration time. Stored rather than re-read from the
+   * rule so that later edits to the rule cannot rewrite a historical
+   * declaration. `insurerRateApplied` is null on Single Rate covers.
+   */
+  clientRateApplied?: number;
+  insurerRateApplied?: number | null;
+  /** FX captured at declaration date, cover currency → reporting currency. */
+  rateOfExchange?: number;
+  /** True when the cover's minimum premium floored the calculated figure. */
+  minimumPremiumApplied?: boolean;
+
   /** Set when the deal is bound (via the pipeline Bind action). Anchors invoice aging. */
   bindDate?: string;
   coverNoteNumber?: string;
@@ -277,6 +305,94 @@ export interface HistoryLog {
   fromStage: string;
   toStage: string;
   date: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              Master Policies                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Open Cover and Certificate are two *types* of master policy, not two pages.
+ * Set at creation and immutable once the policy has any declaration — the
+ * type determines how declarations behave, so changing it under live
+ * declarations would retroactively change what they are.
+ */
+export type MasterPolicyType = 'Open Cover' | 'Certificate';
+export const MASTER_POLICY_TYPES: MasterPolicyType[] = ['Open Cover', 'Certificate'];
+
+/**
+ * Single Rate — one rate applies to both sides, no spread.
+ * Dual Rate  — separate client and insurer rates; the difference is the spread,
+ *              which is broker income and is never stored (always derived).
+ */
+export type RateStructure = 'Single Rate' | 'Dual Rate';
+export const RATE_STRUCTURES: RateStructure[] = ['Single Rate', 'Dual Rate'];
+
+export interface MasterPolicy {
+  id: string;
+  /** Cover reference, e.g. OC/2026/0012. */
+  policyNumber: string;
+  clientId: string;
+
+  /** Immutable once declarations exist. See `canChangePolicyType`. */
+  policyType: MasterPolicyType;
+  rateStructure: RateStructure;
+
+  /** Read-only in the policy form — the list is managed in Administration. */
+  lineOfBusiness: LineOfBusiness;
+  productType?: ProductType;
+  typeOfInsurance?: string;
+  insuranceCompany?: string;
+
+  /** Cover currency. Marine cargo routinely runs USD, hence a field per cover. */
+  currency: Currency;
+  /** Floor the insurer will accept per declaration, in cover currency. */
+  minimumPremium?: number;
+
+  periodStart?: string;
+  periodEnd?: string;
+  /** Aggregate limit for the cover, when one applies. */
+  sumInsuredLimit?: number;
+
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * An effective-dated rate for a master policy.
+ *
+ * Rates apply to SUM INSURED, never to premium. Rules are effective-dated
+ * because rates change mid-term and re-opening an old declaration must
+ * recalculate at the rate that applied *then*, not today's.
+ *
+ * The spread is never a column. It is always `clientRatePercent −
+ * insurerRatePercent`, derived at the point of use.
+ */
+export interface RatingRule {
+  id: string;
+  masterPolicyId: string;
+
+  /**
+   * Optional narrowing, e.g. a commodity or voyage class. Undefined means the
+   * rule is the cover's default and applies to any declaration.
+   */
+  scope?: string;
+
+  /** Percent of sum insured charged to the client. */
+  clientRatePercent: number;
+  /**
+   * Percent of sum insured the insurer books. Null on Single Rate covers,
+   * where the client rate applies to both sides.
+   */
+  insurerRatePercent: number | null;
+
+  /** Inclusive ISO date from which this rule applies. */
+  effectiveFrom: string;
+  /** Exclusive ISO date. Undefined means open-ended. */
+  effectiveTo?: string;
+
+  createdAt: string;
 }
 
 export interface Claim {
