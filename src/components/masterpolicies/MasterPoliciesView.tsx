@@ -5,6 +5,7 @@ import { Plus, Search, Umbrella, FileCheck, Edit2, Trash2, AlertTriangle, X, Lay
 import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
 import { MasterPolicyForm } from './MasterPolicyForm';
+import { MasterPolicyDetailView } from './MasterPolicyDetailView';
 
 /**
  * One page, one list. Open Cover and Certificate are two *types* of master
@@ -25,6 +26,7 @@ export const MasterPoliciesView = () => {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editPolicy, setEditPolicy] = useState<MasterPolicy | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<MasterPolicy | null>(null);
+  const [detailPolicy, setDetailPolicy] = useState<MasterPolicy | null>(null);
 
   const counts = useMemo(() => {
     const base: Record<TypeFilter, number> = { All: masterPolicies.length, 'Open Cover': 0, 'Certificate': 0 };
@@ -48,6 +50,11 @@ export const MasterPoliciesView = () => {
       })
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   }, [masterPolicies, typeFilter, search, clients]);
+
+  if (detailPolicy) {
+    const fresh = masterPolicies.find(mp => mp.id === detailPolicy.id) || detailPolicy;
+    return <MasterPolicyDetailView policy={fresh} onBack={() => setDetailPolicy(null)} />;
+  }
 
   const declarationCount = (id: string) => deals.filter(d => d.masterPolicyId === id).length;
   const ruleCount = (id: string) => ratingRules.filter(r => r.masterPolicyId === id).length;
@@ -130,7 +137,11 @@ export const MasterPoliciesView = () => {
                 const Icon = meta.icon;
                 const rules = ruleCount(mp.id);
                 return (
-                  <tr key={mp.id} className="hover:bg-slate-50 transition-colors group">
+                  <tr
+                    key={mp.id}
+                    onClick={() => setDetailPolicy(mp)}
+                    className="hover:bg-slate-50 transition-colors group cursor-pointer"
+                  >
                     <td className="px-6 py-3">
                       <div className="font-semibold text-slate-900">{mp.policyNumber}</div>
                       {rules === 0 && (
@@ -181,7 +192,10 @@ export const MasterPoliciesView = () => {
                       </span>
                     </td>
                     <td className="px-6 py-3 text-right">
-                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div
+                        className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={e => e.stopPropagation()}
+                      >
                         <button
                           onClick={() => setEditPolicy(mp)}
                           className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
