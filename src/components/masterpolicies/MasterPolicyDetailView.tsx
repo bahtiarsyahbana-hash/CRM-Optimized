@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useData } from '../../context/DataContext';
 import { MasterPolicy, RatingRule, Deal } from '../../types';
-import { rateDeclaration } from '../../utils/masterPolicyRating';
+import { exceedsLimitOfLiability } from '../../utils/masterPolicyRating';
 import {
   ArrowLeft, Umbrella, FileCheck, Plus, Percent, Edit2, Trash2,
   AlertTriangle, Lock, X,
@@ -117,17 +117,8 @@ export const MasterPolicyDetailView: React.FC<{
             <Summary label="Spread earned" value={`${cover.currency} ${money(totals.spread)}`} tone="indigo" />
           </>
         )}
-        {(cover.minimumPremiumClient || cover.minimumPremiumInsurer) && (
-          <Summary
-            label="Minimum premium"
-            value={isDual
-              ? `${money(cover.minimumPremiumInsurer ?? 0)} / ${money(cover.minimumPremiumClient ?? 0)}`
-              : money(cover.minimumPremiumClient ?? 0)}
-            hint={isDual ? 'insurer / client' : undefined}
-          />
-        )}
         {cover.sumInsuredLimit != null && (
-          <Summary label="Cover limit" value={`${cover.currency} ${money(cover.sumInsuredLimit)}`} />
+          <Summary label="Limit of liability" value={`${cover.currency} ${money(cover.sumInsuredLimit)}`} />
         )}
       </div>
 
@@ -272,8 +263,8 @@ export const MasterPolicyDetailView: React.FC<{
                 <tr key={d.id} className="hover:bg-slate-50">
                   <td className="px-5 py-2.5">
                     <div className="font-semibold text-slate-900">{d.declarationNumber || '—'}</div>
-                    {d.minimumPremiumApplied && (
-                      <div className="text-[10px] text-amber-700">minimum applied</div>
+                    {exceedsLimitOfLiability(cover, d.sumInsured || 0) && (
+                      <div className="text-[10px] text-amber-700">over limit of liability</div>
                     )}
                   </td>
                   <td className="px-5 py-2.5 text-slate-600">

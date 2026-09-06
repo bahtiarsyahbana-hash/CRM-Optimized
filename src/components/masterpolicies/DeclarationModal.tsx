@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useData } from '../../context/DataContext';
 import { MasterPolicy, RatingRule, Client } from '../../types';
 import {
-  resolveRatingRule, rateDeclaration, MissingRatingRuleError,
+  resolveRatingRule, rateDeclaration, MissingRatingRuleError, exceedsLimitOfLiability,
 } from '../../utils/masterPolicyRating';
 import { X, FileCheck, Lock, AlertTriangle } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -72,6 +72,8 @@ export const DeclarationModal: React.FC<{
   );
 
   const isDual = cover.rateStructure === 'Dual Rate';
+  // Advisory only — the limit caps insured value, never premium, and never blocks.
+  const overLimit = si > 0 && exceedsLimitOfLiability(cover, si);
   const canSubmit = Boolean(rule) && si > 0 && declarationNumber.trim() !== '';
 
   const submit = (e: React.FormEvent) => {
@@ -99,7 +101,6 @@ export const DeclarationModal: React.FC<{
       clientRateApplied: applied.clientRatePercent,
       insurerRateApplied: applied.insurerRatePercent,
       rateOfExchange: parseNum(rateOfExchange),
-      minimumPremiumApplied: applied.minimumPremiumApplied,
 
       // Inherited from the cover.
       dealType: 'New Business',
@@ -256,13 +257,11 @@ export const DeclarationModal: React.FC<{
                           </div>
                         </>
                       )}
-                      {rating.minimumPremiumApplied && (
+                      {overLimit && (
                         <div className="text-[12px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-                          Minimum premium applied
-                          {rating.insurerFloored && rating.clientFloored ? ' to both sides'
-                            : rating.insurerFloored ? ' to the insurer side'
-                            : ' to the client side'}.
-                          {isDual && ' The spread is the difference between the two floors.'}
+                          Sum insured exceeds the cover&rsquo;s limit of liability
+                          ({cover.currency} {money(cover.sumInsuredLimit ?? 0)}). Rating is unaffected and
+                          this declaration can still be saved — check the acceptance with the insurer.
                         </div>
                       )}
                       {rating.spreadIsNegative && (

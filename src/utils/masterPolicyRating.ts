@@ -133,15 +133,10 @@ export interface DeclarationRating {
   /** clientPremium − insurerPremium. Broker income, not commissionable. */
   spreadAmount: number;
 
-  /** True when either minimum premium floored its side. */
-  minimumPremiumApplied: boolean;
-  clientFloored: boolean;
-  insurerFloored: boolean;
-
   /**
    * True when the derived spread is negative — a data problem, not a valid
-   * state. `validateMinimumPremiums` prevents the cover configuration that
-   * causes it; this flag is the backstop for records that predate the check.
+   * state. RatingRuleModal rejects an insurer rate above the client rate; this
+   * is the backstop for any rule written before that check existed.
    */
   spreadIsNegative: boolean;
 
@@ -155,15 +150,13 @@ export interface DeclarationRating {
 /**
  * Rate one declaration.
  *
- * The two minimum premiums apply independently — each floors its own side,
- * neither is derived from the other. When a shipment is floored the spread is
- * therefore simply the difference between whatever the two sides landed on,
- * which may be narrower than the rate-based spread would have been. That is
- * intended: the floors come from two separately negotiated contracts, and the
- * broker earns the difference between them, not a protected margin.
+ * Premium is rate × sum insured, with no floor and no cap. The cover's Limit
+ * of Liability caps *sum insured*, not premium, and is deliberately absent
+ * from this function — exceeding it raises a warning at entry, never a silent
+ * adjustment to the figures.
  */
 export function rateDeclaration(
-  cover: Pick<MasterPolicy, 'rateStructure' | 'minimumPremiumInsurer' | 'minimumPremiumClient'>,
+  cover: Pick<MasterPolicy, 'rateStructure'>,
   rule: Pick<RatingRule, 'clientRatePercent' | 'insurerRatePercent'>,
   sumInsured: number,
 ): DeclarationRating {
@@ -177,21 +170,10 @@ export function rateDeclaration(
     ? 0
     : clientRatePercent - insurerRatePercent;
 
-  const rateBasedClient = sumInsured * (clientRatePercent / 100);
-  const rateBasedInsurer = insurerRatePercent === null
-    ? rateBasedClient
+  const clientPremium = sumInsured * (clientRatePercent / 100);
+  const insurerPremium = insurerRatePercent === null
+    ? clientPremium
     : sumInsured * (insurerRatePercent / 100);
-
-  // Single Rate covers use the client floor only — there is no separate
-  // insurer premium to floor.
-  const clientFloor = cover.minimumPremiumClient ?? 0;
-  const insurerFloor = isDual ? (cover.minimumPremiumInsurer ?? 0) : clientFloor;
-
-  const clientFloored = clientFloor > 0 && rateBasedClient < clientFloor;
-  const insurerFloored = insurerFloor > 0 && rateBasedInsurer < insurerFloor;
-
-  const clientPremium = clientFloored ? clientFloor : rateBasedClient;
-  const insurerPremium = insurerFloored ? insurerFloor : rateBasedInsurer;
 
   const spreadAmount = clientPremium - insurerPremium;
 
@@ -202,9 +184,6 @@ export function rateDeclaration(
     clientPremium,
     insurerPremium,
     spreadAmount,
-    minimumPremiumApplied: clientFloored || insurerFloored,
-    clientFloored,
-    insurerFloored,
     spreadIsNegative: spreadAmount < 0,
     toDealPremiumFields: {
       basicPremium: insurerPremium,
@@ -214,64 +193,25 @@ export function rateDeclaration(
 }
 
 /* -------------------------------------------------------------------------- */
-/*                            Cover-level validation                          */
-/* -------------------------------------------------------------------------- */
-
-export interface MinimumPremiumValidation {
-  ok: boolean;
-  error?: string;
-  /**
-   * The spread a fully floored shipment would produce. Surface this on the
-   * cover form before save so the user sees what the two floors imply.
-   * Null when the cover has no floors, or is Single Rate.
-   */
-  flooredSpread: number | null;
-}
-
-/**
- * Validate the two minimum premiums against each other.
- *
- * The client floor must be at least the insurer floor, otherwise a floored
- * shipment would produce a negative spread — the broker paying to place it.
- * An insurer floor with no client floor is the same failure with the client
- * side left implicitly at zero, so it is rejected too.
- */
-export function validateMinimumPremiums(
-  cover: Pick<MasterPolicy, 'rateStructure' | 'minimumPremiumInsurer' | 'minimumPremiumClient'>,
-): MinimumPremiumValidation {
-  const insurer = cover.minimumPremiumInsurer ?? 0;
-  const client = cover.minimumPremiumClient ?? 0;
-
-  // Single Rate uses the client floor alone; there is nothing to compare.
-  if (cover.rateStructure !== 'Dual Rate') {
-    return { ok: true, flooredSpread: null };
-  }
-
-  if (insurer > 0 && client === 0) {
-    return {
-      ok: false,
-      error: 'Set a client minimum premium as well. An insurer floor with no client floor would produce a negative spread on a floored shipment.',
-      flooredSpread: null,
-    };
-  }
-
-  if (client < insurer) {
-    return {
-      ok: false,
-      error: `Client minimum premium (${client.toLocaleString()}) cannot be below the insurer minimum (${insurer.toLocaleString()}) — a floored shipment would produce a negative spread.`,
-      flooredSpread: client - insurer,
-    };
-  }
-
-  return {
-    ok: true,
-    flooredSpread: (client > 0 || insurer > 0) ? client - insurer : null,
-  };
-}
-
-/* -------------------------------------------------------------------------- */
 /*                                   Guards                                   */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * Whether a declaration's sum insured exceeds the cover's Limit of Liability.
+ *
+ * Advisory only. The limit caps insured value, not premium, and it deliberately
+ * does not enter `rateDeclaration` — a declaration above the limit still rates
+ * normally and is still accepted. Whether to write it is the broker's call,
+ * often after agreeing a special acceptance with the insurer, so the form warns
+ * rather than blocks.
+ */
+export function exceedsLimitOfLiability(
+  cover: Pick<MasterPolicy, 'sumInsuredLimit'>,
+  sumInsured: number,
+): boolean {
+  const limit = cover.sumInsuredLimit ?? 0;
+  return limit > 0 && sumInsured > limit;
+}
 
 /** A deal is a declaration when it was raised under a master policy. */
 export const isDeclaration = (deal: Pick<Deal, 'masterPolicyId'>): boolean =>

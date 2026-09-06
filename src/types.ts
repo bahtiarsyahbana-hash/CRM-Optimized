@@ -277,8 +277,6 @@ export interface Deal {
   insurerRateApplied?: number | null;
   /** FX captured at declaration date, cover currency → reporting currency. */
   rateOfExchange?: number;
-  /** True when the cover's minimum premium floored the calculated figure. */
-  minimumPremiumApplied?: boolean;
 
   /** Set when the deal is bound (via the pipeline Bind action). Anchors invoice aging. */
   bindDate?: string;
@@ -347,26 +345,16 @@ export interface MasterPolicy {
   /** Cover currency. Marine cargo routinely runs USD, hence a field per cover. */
   currency: Currency;
 
-  /**
-   * Minimum premium per declaration, in cover currency.
-   *
-   * Two separately entered figures, neither derived from the other — they come
-   * from two different contracts (the client's cover wording and the insurer's
-   * slip) and are separately negotiated. Validated `client >= insurer` at save.
-   *
-   * Each floor applies independently, so on a floored shipment the spread is
-   * simply the difference between the two — which may be narrower than the
-   * rate-based spread would have been.
-   *
-   * Single Rate covers use `minimumPremiumClient` only; there is no separate
-   * insurer premium to floor.
-   */
-  minimumPremiumInsurer?: number;
-  minimumPremiumClient?: number;
-
   periodStart?: string;
   periodEnd?: string;
-  /** Aggregate limit for the cover, when one applies. */
+  /**
+   * Limit of Liability — the maximum insured value accepted per declaration,
+   * in cover currency.
+   *
+   * A cap on sum insured, not on premium, and it enters no calculation. A
+   * declaration above it raises a warning and is still accepted; the decision
+   * to write it belongs to the broker, not the form.
+   */
   sumInsuredLimit?: number;
 
   notes?: string;

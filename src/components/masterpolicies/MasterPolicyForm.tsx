@@ -7,7 +7,7 @@ import {
   ProductType, PRODUCT_TYPES, insuranceTypesForProduct,
 } from '../../types';
 import { INSURANCE_COMPANIES } from '../../constants/insuranceCompanies';
-import { validateMinimumPremiums, canChangePolicyType } from '../../utils/masterPolicyRating';
+import { canChangePolicyType } from '../../utils/masterPolicyRating';
 import { X, Umbrella, Lock, Info } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
@@ -44,7 +44,7 @@ export const MasterPolicyForm: React.FC<{
   policy?: MasterPolicy | null;
   onClose: () => void;
 }> = ({ policy, onClose }) => {
-  const { clients, deals, addMasterPolicy, updateMasterPolicy } = useData();
+  const { clients, deals, addMasterPolicy, updateMasterPolicy, addRatingRule } = useData();
 
   const [policyNumber, setPolicyNumber] = useState(policy?.policyNumber || '');
   const [clientId, setClientId] = useState(policy?.clientId || '');
@@ -54,10 +54,10 @@ export const MasterPolicyForm: React.FC<{
   const [typeOfInsurance, setTypeOfInsurance] = useState(policy?.typeOfInsurance || '');
   const [insuranceCompany, setInsuranceCompany] = useState(policy?.insuranceCompany || '');
   const [currency, setCurrency] = useState<Currency>(policy?.currency || 'IDR');
-  const [minInsurer, setMinInsurer] = useState(
-    policy?.minimumPremiumInsurer != null ? formatNumber(String(policy.minimumPremiumInsurer)) : '');
-  const [minClient, setMinClient] = useState(
-    policy?.minimumPremiumClient != null ? formatNumber(String(policy.minimumPremiumClient)) : '');
+  // Default rates seed a RatingRule on save — they are not columns on the cover.
+  // Only offered when creating; an existing cover's rates are managed as rules.
+  const [insurerRate, setInsurerRate] = useState('');
+  const [insuredRate, setInsuredRate] = useState('');
   const [periodStart, setPeriodStart] = useState(
     policy?.periodStart ? policy.periodStart.slice(0, 10) : '');
   const [periodEnd, setPeriodEnd] = useState(
@@ -74,16 +74,36 @@ export const MasterPolicyForm: React.FC<{
   const typeLocked = policy ? !canChangePolicyType(policy.id, deals) : false;
   const declarationCount = policy ? deals.filter(d => d.masterPolicyId === policy.id).length : 0;
 
-  const minValidation = useMemo(
-    () => validateMinimumPremiums({
-      rateStructure,
-      minimumPremiumInsurer: parseNum(minInsurer),
-      minimumPremiumClient: parseNum(minClient),
-    }),
-    [rateStructure, minInsurer, minClient],
-  );
-
   const availableTypes = insuranceTypesForProduct(productType);
+
+  /* ---- Default rates ------------------------------------------------------
+   * These seed a RatingRule on save rather than persisting on the cover, so
+   * rates have exactly one home. Dated rules added later resolve against the
+   * seeded rule the same as against any other.
+   * Only offered on create — an existing cover's rates live in its rule list.
+   */
+  const insured = parseNum(insuredRate);
+  const insurerR = parseNum(insurerRate);
+  const limit = parseNum(sumInsuredLimit) ?? 0;
+
+  const rateValidation = useMemo(() => {
+    if (policy) return null;                       // editing: rules are managed separately
+    if (insuredRate === '' && insurerRate === '') return null;  // both blank: seed nothing
+    if (insured === undefined || insured <= 0) return 'Enter a rate for the insured.';
+    if (isDual) {
+      if (insurerR === undefined || insurerR <= 0) return 'Dual Rate covers need a rate from the insurer.';
+      if (insurerR > insured) return 'Insurer rate cannot exceed the insured rate — that is a negative spread.';
+    }
+    return null;
+  }, [policy, insuredRate, insurerRate, insured, insurerR, isDual]);
+
+  // Live spread, in percent and in currency at the limit of liability.
+  const spreadPercent = isDual && insured !== undefined && insurerR !== undefined
+    ? insured - insurerR
+    : null;
+  const spreadAtLimit = spreadPercent !== null && limit > 0
+    ? limit * (spreadPercent / 100)
+    : null;
 
   const handleProductChange = (next: ProductType | '') => {
     setProductType(next);
@@ -95,7 +115,7 @@ export const MasterPolicyForm: React.FC<{
     e.preventDefault();
     if (!policyNumber.trim()) return toast.error('Policy number is required.');
     if (!clientId) return toast.error('Select a client.');
-    if (!minValidation.ok) return toast.error(minValidation.error!);
+    if (rateValidation) return toast.error(rateValidation);
 
     const payload = {
       policyNumber: policyNumber.trim(),
@@ -108,8 +128,6 @@ export const MasterPolicyForm: React.FC<{
       typeOfInsurance: typeOfInsurance || undefined,
       insuranceCompany: insuranceCompany || undefined,
       currency,
-      minimumPremiumInsurer: isDual ? parseNum(minInsurer) : undefined,
-      minimumPremiumClient: parseNum(minClient),
       periodStart: periodStart ? new Date(periodStart).toISOString() : undefined,
       periodEnd: periodEnd ? new Date(periodEnd).toISOString() : undefined,
       sumInsuredLimit: parseNum(sumInsuredLimit),
@@ -121,8 +139,22 @@ export const MasterPolicyForm: React.FC<{
       updateMasterPolicy(policy.id, typeLocked ? { ...payload, policyType: policy.policyType } : payload);
       toast.success('Master policy updated');
     } else {
-      addMasterPolicy(payload);
-      toast.success('Master policy created');
+      const newId = addMasterPolicy(payload);
+
+      // Seed the opening rating rule from the default rates. It is an ordinary
+      // rule — editable, supersedable by a later-dated one — not a special case.
+      if (insured !== undefined && insured > 0) {
+        addRatingRule({
+          masterPolicyId: newId,
+          clientRatePercent: insured,
+          insurerRatePercent: isDual ? (insurerR ?? null) : null,
+          // The cover's effective date, falling back to today when it has none.
+          effectiveFrom: payload.periodStart ?? new Date().toISOString(),
+        });
+        toast.success('Master policy created with its opening rating rule');
+      } else {
+        toast.success('Master policy created — add a rating rule before declaring');
+      }
     }
     onClose();
   };
@@ -239,7 +271,7 @@ export const MasterPolicyForm: React.FC<{
                   <input type="date" value={periodEnd} onChange={e => setPeriodEnd(e.target.value)} className={inputClass} />
                 </Field>
 
-                <Field label={`Sum Insured Limit (${currency})`} hint="Aggregate limit for the cover, if one applies." className="md:col-span-2">
+                <Field label={`Limit of Liability (${currency})`} hint="Maximum insured value per declaration. Advisory — a declaration above it warns but is still accepted." className="md:col-span-2">
                   <input type="text" value={sumInsuredLimit}
                     onChange={e => setSumInsuredLimit(formatNumber(e.target.value))}
                     className={inputClass} placeholder="0" />
@@ -267,45 +299,53 @@ export const MasterPolicyForm: React.FC<{
               </div>
             </section>
 
-            {/* ---- Minimum premium ---- */}
-            <section className="bg-white rounded-lg p-5 border border-slate-200 space-y-4">
-              <h3 className="text-[13px] font-bold text-slate-800 border-b border-slate-100 pb-2">Minimum Premium</h3>
-              <p className="text-[12px] text-slate-500">
-                {isDual
-                  ? 'Two separately negotiated floors — the client’s cover wording and the insurer’s slip. Each applies to its own side.'
-                  : 'One floor applies, since a Single Rate cover has no separate insurer premium.'}
-              </p>
+            {/* ---- Default rates: seed the opening rating rule ---- */}
+            {!policy && (
+              <section className="bg-white rounded-lg p-5 border border-slate-200 space-y-4">
+                <h3 className="text-[13px] font-bold text-slate-800 border-b border-slate-100 pb-2">Default Rates</h3>
+                <p className="text-[12px] text-slate-500">
+                  These create the cover&rsquo;s opening rating rule, effective from the cover&rsquo;s start date.
+                  Rates live as rating rules, not on the cover — add dated rules later to change them mid-term.
+                </p>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {isDual && (
-                  <Field label={`Insurer Minimum (${currency})`} hint="The floor the insurer accepts.">
-                    <input type="text" value={minInsurer}
-                      onChange={e => setMinInsurer(formatNumber(e.target.value))}
-                      className={inputClass} placeholder="0" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {isDual && (
+                    <Field label="Rate % from Insurer" hint="Of sum insured. Commission calculates on this.">
+                      <input type="number" step="0.0001" min="0" value={insurerRate}
+                        onChange={e => setInsurerRate(e.target.value)}
+                        className={inputClass} placeholder="e.g. 0.18" />
+                    </Field>
+                  )}
+                  <Field
+                    label="Rate % for Insured"
+                    hint={isDual ? 'Of sum insured. What the client is charged.' : 'Of sum insured. Applies to both sides.'}
+                  >
+                    <input type="number" step="0.0001" min="0" value={insuredRate}
+                      onChange={e => setInsuredRate(e.target.value)}
+                      className={inputClass} placeholder="e.g. 0.25" />
                   </Field>
-                )}
-                <Field label={`Client Minimum (${currency})`} hint={isDual ? 'Must be at least the insurer minimum.' : undefined}>
-                  <input type="text" value={minClient}
-                    onChange={e => setMinClient(formatNumber(e.target.value))}
-                    className={inputClass} placeholder="0" />
-                </Field>
-              </div>
+                </div>
 
-              {/* Show the resulting spread before save. */}
-              {isDual && !minValidation.ok && (
-                <div className="text-[12px] text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-                  {minValidation.error}
-                </div>
-              )}
-              {isDual && minValidation.ok && minValidation.flooredSpread !== null && (
-                <div className="text-[12px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-2 flex items-center justify-between">
-                  <span>Spread on a floored shipment</span>
-                  <span className="font-mono font-bold">
-                    {currency} {minValidation.flooredSpread.toLocaleString()}
-                  </span>
-                </div>
-              )}
-            </section>
+                {rateValidation && (
+                  <div className="text-[12px] text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                    {rateValidation}
+                  </div>
+                )}
+
+                {/* Live spread, in percent and in currency at the limit of liability. */}
+                {isDual && !rateValidation && spreadPercent !== null && (
+                  <div className="text-[12px] text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-md px-3 py-2 flex items-center justify-between">
+                    <span>Spread</span>
+                    <span className="font-mono font-bold">
+                      {spreadPercent.toFixed(4)}%
+                      {spreadAtLimit !== null
+                        ? ` · ${currency} ${spreadAtLimit.toLocaleString(undefined, { maximumFractionDigits: 2 })} at the limit of liability`
+                        : ' · set a limit of liability to see this in currency'}
+                    </span>
+                  </div>
+                )}
+              </section>
+            )}
 
             <section className="bg-white rounded-lg p-5 border border-slate-200">
               <Field label="Notes">
@@ -321,10 +361,10 @@ export const MasterPolicyForm: React.FC<{
             className="px-5 py-2 text-[13px] font-semibold text-slate-600 hover:bg-slate-100 rounded-md">
             Cancel
           </button>
-          <button type="submit" form="master-policy-form" disabled={!minValidation.ok}
+          <button type="submit" form="master-policy-form" disabled={Boolean(rateValidation)}
             className={cn(
               'px-5 py-2 text-[13px] font-semibold text-white rounded-md shadow-sm transition-colors',
-              minValidation.ok ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-300 cursor-not-allowed',
+              rateValidation ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700',
             )}>
             {policy ? 'Save Changes' : 'Create Master Policy'}
           </button>
