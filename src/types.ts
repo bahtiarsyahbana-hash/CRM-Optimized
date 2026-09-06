@@ -346,8 +346,23 @@ export interface MasterPolicy {
 
   /** Cover currency. Marine cargo routinely runs USD, hence a field per cover. */
   currency: Currency;
-  /** Floor the insurer will accept per declaration, in cover currency. */
-  minimumPremium?: number;
+
+  /**
+   * Minimum premium per declaration, in cover currency.
+   *
+   * Two separately entered figures, neither derived from the other — they come
+   * from two different contracts (the client's cover wording and the insurer's
+   * slip) and are separately negotiated. Validated `client >= insurer` at save.
+   *
+   * Each floor applies independently, so on a floored shipment the spread is
+   * simply the difference between the two — which may be narrower than the
+   * rate-based spread would have been.
+   *
+   * Single Rate covers use `minimumPremiumClient` only; there is no separate
+   * insurer premium to floor.
+   */
+  minimumPremiumInsurer?: number;
+  minimumPremiumClient?: number;
 
   periodStart?: string;
   periodEnd?: string;

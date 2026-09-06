@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useData } from '../../context/DataContext';
 import { Deal } from '../../types';
 import { DealTrack, trackOf } from '../../utils/dealTrack';
+import { isDeclaration } from '../../utils/masterPolicyRating';
 import { Search, Building2, Edit2, GitBranch, Trash2, AlertTriangle, X, ShieldCheck } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
@@ -21,6 +22,11 @@ export const PipelineView = () => {
   const [journeyDeal, setJourneyDeal] = useState<Deal | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Deal | null>(null);
   const [bindCandidate, setBindCandidate] = useState<Deal | null>(null);
+  const [showDeclarations, setShowDeclarations] = useState(false);
+
+  const hiddenDeclarationCount = showDeclarations
+    ? 0
+    : deals.filter(d => d.approvalStatus === 'Approved' && isDeclaration(d)).length;
 
   const confirmBind = () => {
     if (!bindCandidate) return;
@@ -63,6 +69,11 @@ export const PipelineView = () => {
     // The Pipeline only shows approved deals — everything before approval
     // lives in the Submission view and lands here once it's approved.
     if (d.approvalStatus !== 'Approved') return false;
+
+    // Declarations under a master policy are excluded by default: one cover
+    // with 200 shipments would bury the working view. They stay reachable
+    // from their cover, or here via the toggle.
+    if (!showDeclarations && isDeclaration(d)) return false;
 
     // Which tab the deal belongs to. Shared with the Submissions tab strip so
     // the two views can't disagree about what counts as a renewal.
@@ -146,8 +157,26 @@ export const PipelineView = () => {
             />
           </div>
           <div className="flex items-center gap-2">
-            <select 
-              value={filterType} 
+            {/* Declarations are hidden by default so a single cover with many
+                shipments can't bury the working view. */}
+            {(showDeclarations || hiddenDeclarationCount > 0) && (
+              <button
+                onClick={() => setShowDeclarations(v => !v)}
+                className={cn(
+                  'px-2.5 py-2 rounded-md text-[12px] font-semibold border transition-colors whitespace-nowrap',
+                  showDeclarations
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50',
+                )}
+                title="Declarations raised under a master policy"
+              >
+                {showDeclarations
+                  ? 'Hide declarations'
+                  : `Show declarations (${hiddenDeclarationCount})`}
+              </button>
+            )}
+            <select
+              value={filterType}
               onChange={e => setFilterType(e.target.value)}
               className="px-3 py-2 bg-white border border-slate-200 rounded-md text-[13px] text-slate-700 focus:outline-none focus:border-blue-500 transition-colors"
             >

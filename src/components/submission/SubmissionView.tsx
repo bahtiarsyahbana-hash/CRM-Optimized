@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { DealDetailForm } from '../clients/DealDetailForm';
 import { ApprovalActionMenu, ApprovalStatusBadge } from '../pipeline/ApprovalActionMenu';
 import { DealTrack, trackOf } from '../../utils/dealTrack';
+import { isDeclaration } from '../../utils/masterPolicyRating';
 
 /**
  * Submissions are deals that have not yet been approved. Approving one moves
@@ -42,15 +43,28 @@ export const SubmissionView: React.FC<{
   const { deals, clients, deleteDeal } = useData();
   const [search, setSearch] = useState('');
   const [trackFilter, setTrackFilter] = useState<TrackFilter>(initialTrack);
+  const [showDeclarations, setShowDeclarations] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editDeal, setEditDeal] = useState<Deal | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Deal | null>(null);
 
   // Everything that is not yet Approved lives here.
+  //
+  // Declarations under a master policy are excluded by default: one cover with
+  // 200 shipments would bury the daily working view. They stay reachable from
+  // their cover, or here via the toggle.
   const submissions = useMemo(
-    () => deals.filter(d => d.approvalStatus !== 'Approved'),
-    [deals]
+    () => deals.filter(d =>
+      d.approvalStatus !== 'Approved' && (showDeclarations || !isDeclaration(d))),
+    [deals, showDeclarations]
+  );
+
+  const hiddenDeclarationCount = useMemo(
+    () => showDeclarations
+      ? 0
+      : deals.filter(d => d.approvalStatus !== 'Approved' && isDeclaration(d)).length,
+    [deals, showDeclarations]
   );
 
   // Tab counts span every submission, so the strip shows the overall split
@@ -178,6 +192,25 @@ export const SubmissionView: React.FC<{
                 onClick={() => setStatusFilter(s)}
               />
             ))}
+
+            {/* Declarations are hidden by default so a single cover with many
+                shipments can't bury the working view. */}
+            {(showDeclarations || hiddenDeclarationCount > 0) && (
+              <button
+                onClick={() => setShowDeclarations(v => !v)}
+                className={cn(
+                  'px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ml-1',
+                  showDeclarations
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50',
+                )}
+                title="Declarations raised under a master policy"
+              >
+                {showDeclarations
+                  ? 'Hide declarations'
+                  : `Show declarations (${hiddenDeclarationCount})`}
+              </button>
+            )}
           </div>
         </div>
 
