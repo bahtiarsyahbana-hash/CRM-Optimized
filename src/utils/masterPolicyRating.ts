@@ -24,6 +24,29 @@ import { MasterPolicy, RatingRule, Deal } from '../types';
  *
  * On a Single Rate cover insurerRate is null: basicPremium is the client
  * premium and markup is zero.
+ *
+ * ── Document separation: read before building any output ──────────────────
+ *
+ * TODO(certificate-generator): a Dual Rate cover produces two premium figures
+ * for one shipment, and they must never appear together. Client-facing output
+ * (certificate, client invoice) carries the client rate only; insurer-facing
+ * output (bordereau, insurer statement) carries the insurer rate only. The
+ * spread and the insurer rate must never render on anything client-facing.
+ *
+ * The hazard is that a declaration is a `Deal`, so all of these sit on one
+ * object and are one careless spread-operator away from a client document:
+ *
+ *     insurerRateApplied · basicPremium · premiumMarkup    ← insurer-side only
+ *     clientRateApplied  · premiumAmount                   ← client-side
+ *
+ * So a certificate generator must accept a narrowed client-facing type, never
+ * a raw Deal, making omission a compile error rather than a disclosure. Same
+ * in reverse for a bordereau. Neither generator exists yet — nothing leaks
+ * today — but the shape is a trap for whoever builds them.
+ *
+ * The full note, including the suggested type, is at the top of
+ * `utils/coverNoteGenerator.ts`, which is the only client-facing generator
+ * currently in the codebase.
  */
 
 /* -------------------------------------------------------------------------- */

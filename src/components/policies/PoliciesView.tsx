@@ -4,7 +4,7 @@ import { FileText, ExternalLink, X, Search, Receipt, ChevronRight, ChevronDown, 
 import { cn } from '../../lib/utils';
 import { Deal } from '../../types';
 import toast from 'react-hot-toast';
-import { generateCoverNote } from '../../utils/coverNoteGenerator';
+import { generateCoverNote, canGenerateCoverNote } from '../../utils/coverNoteGenerator';
 import { PolicyPreviewModal } from './PolicyPreviewModal';
 import { InvoiceModal } from './InvoiceModal';
 import { getInvoiceAging } from '../../utils/invoiceAging';
@@ -108,8 +108,17 @@ export const PoliciesView: React.FC<{
   const handleDownloadCoverNote = (deal: Deal) => {
     const client = clients.find(c => c.id === deal.clientId);
     if (!client) return toast.error('Client data missing');
-    generateCoverNote(deal, client);
-    toast.success('Cover note downloaded');
+
+    // The button is disabled when ineligible; this catches any other route in.
+    const eligibility = canGenerateCoverNote(deal);
+    if (!eligibility.allowed) return toast.error(eligibility.reason!);
+
+    try {
+      generateCoverNote(deal, client);
+      toast.success('Cover note downloaded');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not generate the cover note.');
+    }
   };
 
   return (

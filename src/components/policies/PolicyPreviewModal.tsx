@@ -4,6 +4,8 @@ import { X, Download, Upload, ShieldAlert, FileEdit, FileText, AlertTriangle } f
 import { useData } from '../../context/DataContext';
 import toast from 'react-hot-toast';
 import { canFileClaim, getInvoiceAging } from '../../utils/invoiceAging';
+import { canGenerateCoverNote } from '../../utils/coverNoteGenerator';
+import { cn } from '../../lib/utils';
 
 interface Props {
   policy: Deal;
@@ -28,6 +30,8 @@ export const PolicyPreviewModal = ({ policy, client, onClose, onUploadOriginal, 
   const [claimCurrency, setClaimCurrency] = useState<Currency>((policy.currency as Currency) || 'IDR');
 
   const claimGate = canFileClaim(policy);
+  // A cover note is only issuable once the submission is approved and bound.
+  const coverNoteGate = canGenerateCoverNote(policy);
   const invoiceAging = getInvoiceAging(policy);
 
   const handleAftersalesSubmit = (e: React.FormEvent) => {
@@ -102,10 +106,26 @@ export const PolicyPreviewModal = ({ policy, client, onClose, onUploadOriginal, 
                 <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Cover Note</div>
                 <div className="text-[14px] font-bold text-slate-900 mb-1">{coverNoteNumber}</div>
                 <div className="text-[12px] text-slate-500">Generated from deal data</div>
-                <div className="mt-4 pt-4 border-t border-slate-100 flex gap-2">
-                  <button onClick={onDownloadCoverNote} className="px-3 py-2 text-[12px] font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors flex items-center gap-1.5">
+                <div className="mt-4 pt-4 border-t border-slate-100 space-y-2">
+                  <button
+                    onClick={onDownloadCoverNote}
+                    disabled={!coverNoteGate.allowed}
+                    title={coverNoteGate.reason}
+                    className={cn(
+                      'px-3 py-2 text-[12px] font-semibold rounded-md transition-colors flex items-center gap-1.5',
+                      coverNoteGate.allowed
+                        ? 'text-white bg-blue-600 hover:bg-blue-700'
+                        : 'text-slate-400 bg-slate-100 cursor-not-allowed',
+                    )}
+                  >
                     <Download className="w-3.5 h-3.5" /> Download Cover Note
                   </button>
+                  {!coverNoteGate.allowed && (
+                    <div className="flex items-start gap-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-2">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                      <span>{coverNoteGate.reason}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 

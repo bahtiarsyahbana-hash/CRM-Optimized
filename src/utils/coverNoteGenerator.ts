@@ -1,7 +1,97 @@
 import { jsPDF } from 'jspdf';
-import { Deal, Client } from '../types';
+import { Deal, Client, DealStage } from '../types';
+
+/* -------------------------------------------------------------------------- */
+/*                    CLIENT-FACING DOCUMENT — READ THIS FIRST                */
+/* -------------------------------------------------------------------------- */
+/**
+ * The cover note is a **client-facing** document. Everything printed here is
+ * seen by the insured.
+ *
+ * TODO(certificate-generator): when a certificate generator is built for
+ * declarations under a master policy, it must NOT take a raw `Deal`. Declarations
+ * carry insurer-side figures on the same record as client-side ones:
+ *
+ *     insurerRateApplied   the insurer's rate on a Dual Rate cover
+ *     basicPremium         what the insurer books
+ *     premiumMarkup        the spread — broker income
+ *
+ * On a Dual Rate cover the spread and the insurer rate must never reach a
+ * client-facing document or response. Passing a whole `Deal` into a client
+ * document makes that a one-line mistake away, because the dangerous fields are
+ * simply present on the object.
+ *
+ * Build a narrowed client-facing type instead — something like
+ * `ClientFacingDeclaration` exposing only `clientRateApplied`, `premiumAmount`,
+ * `sumInsured`, `currency`, period and identifiers — and have the generator
+ * accept only that. Then omitting a field is a compile error rather than a
+ * disclosure. Mirror it with an insurer-facing type for the bordereau.
+ *
+ * See the matching note in `utils/masterPolicyRating.ts`.
+ *
+ * This generator is safe today only because it is never handed a declaration:
+ * it is reached from the Policy Register, and it prints no rate or markup field.
+ */
+
+/* -------------------------------------------------------------------------- */
+/*                                   Gating                                   */
+/* -------------------------------------------------------------------------- */
+
+/** Stages at which a deal is bound and a cover note may be issued. */
+const BOUND_STAGES: DealStage[] = ['Bind / Closed Won', 'Policy On Progress'];
+
+export interface CoverNoteEligibility {
+  allowed: boolean;
+  /** Why not, phrased for the user. Undefined when allowed. */
+  reason?: string;
+}
+
+/**
+ * A cover note may only be issued once the submission is complete — approved,
+ * and bound.
+ *
+ * Note that `originalPolicyFile` is deliberately *not* required. A cover note is
+ * the interim document issued while the insurer's policy is still being drawn
+ * up; requiring the policy PDF would block it exactly when it is needed.
+ *
+ * This matters because the Policy Register admits any deal whose `dealType` is
+ * 'Renewal' regardless of stage or approval, so reaching the button is not by
+ * itself evidence that the deal is bound.
+ *
+ * TODO(supabase): mirror as a server-side check when the backend lands, so an
+ * API client cannot render a cover note for an unbound deal.
+ */
+export function canGenerateCoverNote(deal: Deal): CoverNoteEligibility {
+  if (deal.approvalStatus !== 'Approved') {
+    return {
+      allowed: false,
+      reason: `This submission is ${deal.approvalStatus || 'Draft'}. A cover note can only be issued once it is approved and bound.`,
+    };
+  }
+  if (!BOUND_STAGES.includes(deal.statusStage)) {
+    return {
+      allowed: false,
+      reason: `This deal is at ${deal.statusStage}. Bind it before issuing a cover note.`,
+    };
+  }
+  return { allowed: true };
+}
+
+/** Thrown when generation is attempted on a deal that is not yet complete. */
+export class CoverNoteNotAvailableError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = 'CoverNoteNotAvailableError';
+  }
+}
 
 export const generateCoverNote = (deal: Deal, client: Client) => {
+  // Enforced here, not only at the call site, so a future caller cannot skip it.
+  const eligibility = canGenerateCoverNote(deal);
+  if (!eligibility.allowed) {
+    throw new CoverNoteNotAvailableError(eligibility.reason!);
+  }
+
   const doc = new jsPDF();
   
   // Header
